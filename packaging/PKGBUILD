@@ -10,6 +10,11 @@
 # you run `paru -Bi packaging/` instead of makepkg directly. Everything
 # else below (including pyside6, python-py7zr, python-rarfile) is in the
 # official [extra] repo.
+#
+# pkgver() derives from the current git commit (0.1.0.r<count>.g<hash>),
+# not a hardcoded string, so every new commit produces a version AUR
+# helpers recognize as new - `paru -Bi` won't silently skip rebuilding a
+# stale cached version after you pull new source changes.
 
 pkgname=lmm
 pkgver=0.1.0
@@ -38,7 +43,7 @@ sha256sums=()
 
 pkgver() {
 	cd "$startdir/.."
-	printf '%s' "$pkgver"
+	printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
