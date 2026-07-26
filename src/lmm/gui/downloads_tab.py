@@ -70,7 +70,7 @@ class DownloadsTab(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name
+        header.setStretchLastSection(False)
 
         layout = QVBoxLayout(self)
         layout.addLayout(input_row)

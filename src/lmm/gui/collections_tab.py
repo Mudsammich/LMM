@@ -52,7 +52,7 @@ class CollectionsTab(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Mod
+        header.setStretchLastSection(False)
 
         top_row = QHBoxLayout()
         top_row.addWidget(import_btn)

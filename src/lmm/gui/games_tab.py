@@ -31,7 +31,7 @@ class GamesTab(QWidget):
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Install path
+        header.setStretchLastSection(False)
 
         add_btn = QPushButton("Add Game…")
         edit_btn = QPushButton("Edit…")

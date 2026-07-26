@@ -41,7 +41,7 @@ class ModsTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Name
+        header.setStretchLastSection(False)
 
         install_btn = QPushButton("Install from archive…")
         remove_btn = QPushButton("Remove")
