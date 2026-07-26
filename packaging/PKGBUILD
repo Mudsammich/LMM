@@ -43,7 +43,11 @@ source=()
 sha256sums=()
 
 pkgver() {
-	cd "$startdir/.."
+	cd "$startdir/.." || { echo "pkgver(): cannot cd to \$startdir/.. ($startdir/..)" >&2; return 1; }
+	if ! git rev-parse --git-dir >/dev/null 2>&1; then
+		echo "pkgver(): $(pwd) is not a git repository - \$startdir is '$startdir'" >&2
+		return 1
+	fi
 	printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
