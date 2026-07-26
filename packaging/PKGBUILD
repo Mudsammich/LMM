@@ -1,0 +1,52 @@
+# Maintainer: you <you@example.com>
+# PKGBUILD for building LMM (Linux Mod Manager) from a local checkout on
+# Arch-based distros, including CachyOS.
+#
+# Build + install with:
+#   cd packaging && makepkg -si
+#
+# Several Python dependencies below only exist in the AUR. Build them
+# first with an AUR helper (e.g. `paru -S python-vdf python-py7zr
+# python-rarfile`) or let your AUR helper resolve them automatically if
+# you run `paru -Bi packaging/` instead of makepkg directly.
+
+pkgname=lmm
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Linux Mod Manager - Nexus Mods downloads, Proton prefix linking, and mod deployment"
+arch=('any')
+url="https://github.com/mudsammich/lmm"
+license=('MIT')
+depends=(
+	'python'
+	'python-pyside6'
+	'python-requests'
+	'python-platformdirs'
+	'python-vdf'
+	'python-py7zr'
+	'python-rarfile'
+	'xdg-utils'
+)
+optdepends=(
+	'unrar: better .rar mod archive support'
+	'proton-ge-custom: wider Proton compatibility for running mod tools'
+)
+makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+source=()
+sha256sums=()
+
+pkgver() {
+	cd "$startdir"
+	printf '%s' "$pkgver"
+}
+
+build() {
+	cd "$startdir"
+	python -m build --wheel --no-isolation
+}
+
+package() {
+	cd "$startdir"
+	python -m installer --destdir="$pkgdir" dist/*.whl
+	install -Dm644 packaging/lmm.desktop "$pkgdir/usr/share/applications/lmm.desktop"
+}

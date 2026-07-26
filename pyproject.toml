@@ -1,0 +1,34 @@
+[project]
+name = "lmm"
+version = "0.1.0"
+description = "Linux Mod Manager - Nexus Mods downloads, Proton prefix linking, and mod deployment for Linux"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "PySide6>=6.6",
+    "requests>=2.31",
+    "platformdirs>=4.0",
+    "vdf>=3.4",
+    "py7zr>=0.21",
+    "rarfile>=4.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+lmm = "lmm.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=LMM
+GenericName=Linux Mod Manager
+Comment=Nexus Mods downloads, Proton prefix linking, and mod deployment
+Exec=lmm
+Icon=lmm
+Terminal=false
+Categories=Game;Utility;
