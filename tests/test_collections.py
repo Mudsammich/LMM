@@ -80,6 +80,14 @@ def test_import_manifest_from_zip(tmp_path):
         ("https://www.nexusmods.com/fallout4/collections/5atq9t", ("fallout4", "5atq9t")),
         ("https://nexusmods.com/skyrimspecialedition/collections/AbC123", ("skyrimspecialedition", "AbC123")),
         (
+            "https://www.nexusmods.com/games/fallout4/collections/5atq9t",
+            ("fallout4", "5atq9t"),
+        ),
+        (
+            "https://www.nexusmods.com/games/fallout4/collections/5atq9t/mods",
+            ("fallout4", "5atq9t"),
+        ),
+        (
             "https://www.nexusmods.com/fallout4/collections/5atq9t/revisions/278",
             ("fallout4", "5atq9t"),
         ),

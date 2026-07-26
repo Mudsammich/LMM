@@ -150,13 +150,14 @@ def resolve_revision_bundle_url(
     return uri
 
 
-_COLLECTION_URL_RE = re.compile(r"nexusmods\.com/([a-z0-9]+)/collections/([a-zA-Z0-9]+)")
+_COLLECTION_URL_RE = re.compile(r"nexusmods\.com/(?:games/)?([a-z0-9]+)/collections/([a-zA-Z0-9]+)")
 
 
 def parse_collection_url(url: str) -> tuple[str, str]:
-    """Parses an ordinary browser URL, e.g.
-    https://www.nexusmods.com/fallout4/collections/5atq9t, into
-    (game_domain, collection_slug)."""
+    """Parses an ordinary browser URL into (game_domain, collection_slug).
+    Handles both URL shapes Nexus uses:
+    https://www.nexusmods.com/fallout4/collections/5atq9t and
+    https://www.nexusmods.com/games/fallout4/collections/5atq9t(/mods)."""
     match = _COLLECTION_URL_RE.search(url)
     if not match:
         raise ValueError(f"Not a recognisable Nexus Mods collection URL: {url!r}")
