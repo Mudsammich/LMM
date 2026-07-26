@@ -5,10 +5,11 @@
 # Build + install with:
 #   cd packaging && makepkg -si
 #
-# Several Python dependencies below only exist in the AUR. Build them
-# first with an AUR helper (e.g. `paru -S python-vdf python-py7zr
-# python-rarfile`) or let your AUR helper resolve them automatically if
-# you run `paru -Bi packaging/` instead of makepkg directly.
+# python-vdf is AUR-only. Build it first with an AUR helper (e.g.
+# `paru -S python-vdf`) or let your AUR helper resolve it automatically if
+# you run `paru -Bi packaging/` instead of makepkg directly. Everything
+# else below (including pyside6, python-py7zr, python-rarfile) is in the
+# official [extra] repo.
 
 pkgname=lmm
 pkgver=0.1.0
@@ -19,7 +20,7 @@ url="https://github.com/mudsammich/lmm"
 license=('MIT')
 depends=(
 	'python'
-	'python-pyside6'
+	'pyside6'
 	'python-requests'
 	'python-platformdirs'
 	'python-vdf'

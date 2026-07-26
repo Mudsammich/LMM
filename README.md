@@ -51,11 +51,12 @@ cd packaging
 makepkg -si
 ```
 
-Several dependencies (`python-vdf`, `python-py7zr`, `python-rarfile`) live
-in the AUR. Install them with an AUR helper first (`paru -S python-vdf
-python-py7zr python-rarfile`), or build the whole package with an AUR
-helper pointed at `packaging/` so it resolves them for you. `unrar` is an
-optional dependency needed only if you install `.rar` mod archives.
+`python-vdf` is AUR-only - install it with an AUR helper first (`paru -S
+python-vdf`), or build the whole package with an AUR helper pointed at
+`packaging/` so it resolves it for you. Everything else (`pyside6`,
+`python-py7zr`, `python-rarfile`) is in the official `extra` repo, so
+plain `pacman`/`makepkg` handles them. `unrar` is an optional dependency
+needed only if you install `.rar` mod archives.
 
 ### From source (any distro)
 
