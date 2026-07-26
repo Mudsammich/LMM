@@ -125,7 +125,6 @@ def test_fetch_revision_manifest_maps_graphql_response():
                 "collection": {
                     "name": "My Great List",
                     "summary": "A curated list",
-                    "installInstructions": "Install in order",
                     "user": {"name": "someone"},
                 },
                 "modFiles": [

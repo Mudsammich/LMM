@@ -171,7 +171,6 @@ query CollectionRevision($slug: String!, $domain: String!, $revision: Int) {
     collection {
       name
       summary
-      installInstructions
       user { name }
     }
     modFiles {
@@ -237,6 +236,6 @@ def fetch_revision_manifest(
         author=(info.get("user") or {}).get("name", ""),
         summary=info.get("summary", ""),
         domain_name=game_domain,
-        install_instructions=info.get("installInstructions", ""),
+        install_instructions="",  # not exposed on Collection via GraphQL - collection.json import has it
         mods=mods,
     )
