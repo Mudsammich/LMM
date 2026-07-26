@@ -82,11 +82,17 @@ lmm
    "Mod Manager Download" button on Nexus Mods once the handler is
    registered. Reorder mods (later = higher priority = wins conflicts),
    then **Deploy**.
-4. **Collections tab** - import a `collection.json` (or the `.zip` Vortex/
-   the site hands out) and queue every Nexus-sourced mod for download.
-   Bulk collection downloads need a **premium** Nexus API key - see the
-   note in `src/lmm/nexus/collections.py` for why non-premium can't
-   automate this.
+4. **Collections tab** - import a `collection.json` manifest and queue
+   every Nexus-sourced mod for download. There's no way to get that file
+   straight from the website - the "Vortex"/"Add collection" button is a
+   protocol handoff, not a download, and only Vortex or the Nexus Mods App
+   can resolve it (writing `collection.json` into their own profile
+   directory, which you can copy out and import here). If you'd rather
+   skip that entirely, open the collection's **Mods** tab on the website
+   and download each mod individually - those are ordinary `nxm://` links
+   LMM already handles. Bulk collection downloads via the Collections tab
+   also need a **premium** Nexus API key - see the note in
+   `src/lmm/nexus/collections.py` for why non-premium can't automate this.
 
 ## Project layout
 

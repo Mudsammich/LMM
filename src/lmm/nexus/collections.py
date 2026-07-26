@@ -2,17 +2,22 @@
 
 Collections are a curated mod list + load order shipped as a
 ``collection.json`` manifest (schema used by Vortex and the Nexus Mods
-App). The reliable way to get one is exactly how Vortex gets it: the
-website hands out an nxm://site/collections/{slug}/revisions/{revision}
-link, which resolves to a downloadable bundle containing collection.json.
+App). Clicking "Vortex" / "Add collection" on the website does **not**
+hand your browser a downloadable file - it's a protocol handoff (an
+nxm://site/collections/{slug}/revisions/{revision} link, same shape as a
+regular mod nxm link) that only a full mod-manager app can consume. Vortex
+or the Nexus Mods App resolve it via an authenticated/OAuth session and
+write collection.json into their own profile directory - there is no
+public, key-only REST endpoint LMM can call to get that bundle itself.
 
-Nexus does not publish a stable, key-only REST endpoint for resolving that
-bundle URL (the graphql.nexusmods.com API generally expects a browser/OAuth
-session), so ``resolve_revision_bundle_url`` is best-effort: it tries the
-same-shaped endpoint the regular file-download flow uses and raises
-``CollectionAPIUnavailable`` with actionable guidance if Nexus rejects it.
-Manual import of a collection.json (or the .zip Vortex/the site hands out)
-is the dependable path and always works offline.
+``resolve_revision_bundle_url`` is a best-effort attempt at the same-shaped
+endpoint the regular file-download flow uses, kept in case Nexus ever
+exposes this; expect it to fail (``CollectionAPIUnavailable``) today. The
+dependable paths are: (1) run Vortex/the Nexus Mods App once to fetch the
+collection, then copy collection.json out of its profile directory and
+import it here, or (2) skip the manifest entirely and download each mod
+in the collection's "Mods" tab individually - those are ordinary per-file
+nxm links LMM already handles.
 """
 from __future__ import annotations
 
@@ -90,7 +95,9 @@ def parse_manifest(data: dict[str, Any]) -> CollectionManifest:
 
 def import_manifest(path: str | Path) -> CollectionManifest:
     """Load a collection manifest from a ``collection.json`` file, or from
-    a .zip that contains one (the format the Nexus site/Vortex hand out)."""
+    a .zip that contains one. There's no way to get either straight from
+    the website - pull collection.json out of a Vortex/Nexus Mods App
+    profile directory after it fetches the collection once."""
     path = Path(path)
     if path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as zf:
@@ -117,8 +124,11 @@ def resolve_revision_bundle_url(
     except NexusAPIError as exc:
         raise CollectionAPIUnavailable(
             "Nexus Mods has no public key-only API for resolving a collection "
-            "bundle URL. Use the website's 'Download' / 'Vortex' button to fetch "
-            "the collection, then use Collections > Import collection.json in LMM. "
+            "bundle URL. Either run Vortex/the Nexus Mods App once to fetch this "
+            "collection and import the collection.json from its profile directory "
+            "here (Collections > Import collection.json), or open the collection's "
+            "'Mods' tab on the website and download each mod individually - those "
+            "are ordinary nxm links LMM already handles. "
             f"(underlying error: {exc})"
         ) from exc
     uri = result.get("URI") if isinstance(result, dict) else None
