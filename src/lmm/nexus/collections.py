@@ -1,27 +1,38 @@
 """Nexus Mods Collections support.
 
-Collections are a curated mod list + load order shipped as a
-``collection.json`` manifest (schema used by Vortex and the Nexus Mods
-App). Clicking "Vortex" / "Add collection" on the website does **not**
-hand your browser a downloadable file - it's a protocol handoff (an
-nxm://site/collections/{slug}/revisions/{revision} link, same shape as a
-regular mod nxm link) that only a full mod-manager app can consume. Vortex
-or the Nexus Mods App resolve it via an authenticated/OAuth session and
-write collection.json into their own profile directory - there is no
-public, key-only REST endpoint LMM can call to get that bundle itself.
+Collections are a curated mod list + load order. Clicking "Vortex" / "Add
+collection" on the website does **not** hand your browser a downloadable
+file - it's a protocol handoff that only a full mod-manager app can
+consume, and there's no public REST endpoint for the download bundle
+itself (see ``resolve_revision_bundle_url``).
 
-``resolve_revision_bundle_url`` is a best-effort attempt at the same-shaped
-endpoint the regular file-download flow uses, kept in case Nexus ever
-exposes this; expect it to fail (``CollectionAPIUnavailable``) today. The
-dependable paths are: (1) run Vortex/the Nexus Mods App once to fetch the
-collection, then copy collection.json out of its profile directory and
-import it here, or (2) skip the manifest entirely and download each mod
-in the collection's "Mods" tab individually - those are ordinary per-file
-nxm links LMM already handles.
+That said, *viewing* a collection is public - it isn't premium-gated, only
+bulk-downloading one is - so its mod list is available straight from the
+same GraphQL API the website's own collection page calls to render itself.
+``fetch_revision_manifest`` queries that directly: no Vortex, no cookies,
+no login flow, just the same data anyone loading the page already gets.
+The query shape is undocumented for third-party use and reconstructed
+best-effort, so treat failures as "the schema needs adjusting," not "this
+approach doesn't work" - the raised error carries the raw GraphQL response.
+
+Getting the manifest this way is independent of account tier. Actually
+*queueing* every mod's download automatically, however, only works for
+premium keys (regular download_link.json rules apply per mod, same as
+everywhere else in this app) - callers should check
+``NexusClient.is_premium()`` before bulk-queueing and fall back to the
+manual per-mod flow otherwise, exactly as Nexus's own tools do.
+
+The fallback paths remain available if the GraphQL query ever breaks:
+(1) run Vortex/the Nexus Mods App once to fetch the collection, then copy
+collection.json out of its profile directory and import it via
+``import_manifest``, or (2) skip the manifest entirely and download each
+mod in the collection's "Mods" tab individually - those are ordinary
+per-file nxm links LMM already handles.
 """
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -137,3 +148,94 @@ def resolve_revision_bundle_url(
             "Nexus Mods returned no download URL for this collection revision."
         )
     return uri
+
+
+_COLLECTION_URL_RE = re.compile(r"nexusmods\.com/([a-z0-9]+)/collections/([a-zA-Z0-9]+)")
+
+
+def parse_collection_url(url: str) -> tuple[str, str]:
+    """Parses an ordinary browser URL, e.g.
+    https://www.nexusmods.com/fallout4/collections/5atq9t, into
+    (game_domain, collection_slug)."""
+    match = _COLLECTION_URL_RE.search(url)
+    if not match:
+        raise ValueError(f"Not a recognisable Nexus Mods collection URL: {url!r}")
+    return match.group(1), match.group(2)
+
+
+_COLLECTION_REVISION_QUERY = """
+query CollectionRevision($slug: String!, $domain: String!, $revision: Int) {
+  collectionRevision(slug: $slug, domainName: $domain, revision: $revision) {
+    revisionNumber
+    collection {
+      name
+      summary
+      installInstructions
+      user { name }
+    }
+    modFiles {
+      optional
+      file {
+        modId
+        fileId
+        name
+        version
+        game { domainName }
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_revision_manifest(
+    client: NexusClient, game_domain: str, slug: str, revision: int | None = None
+) -> CollectionManifest:
+    """Fetches a collection's manifest straight from Nexus's GraphQL API -
+    see the module docstring for why this needs neither Vortex nor a
+    manually-imported collection.json, and why the query shape is
+    best-effort. ``revision=None`` asks for the latest published revision.
+    """
+    try:
+        data = client.graphql(
+            _COLLECTION_REVISION_QUERY,
+            {"slug": slug, "domain": game_domain, "revision": revision},
+        )
+    except NexusAPIError as exc:
+        raise CollectionAPIUnavailable(
+            f"Couldn't fetch collection '{slug}' ({game_domain}) via the GraphQL API "
+            "- its schema is undocumented and may have shifted. Fall back to "
+            "Import collection.json, or report the error below so the query can be "
+            f"fixed. (underlying error: {exc})"
+        ) from exc
+
+    revision_data = data.get("collectionRevision")
+    if not revision_data:
+        raise CollectionAPIUnavailable(
+            f"Nexus Mods returned no data for collection '{slug}' ({game_domain})."
+        )
+
+    info = revision_data.get("collection") or {}
+    mods: list[CollectionModRef] = []
+    for entry in revision_data.get("modFiles") or []:
+        f = entry.get("file") or {}
+        mods.append(
+            CollectionModRef(
+                name=f.get("name", "unknown"),
+                version=f.get("version", ""),
+                optional=bool(entry.get("optional", False)),
+                domain_name=(f.get("game") or {}).get("domainName", game_domain),
+                source_type="nexus",
+                mod_id=f.get("modId"),
+                file_id=f.get("fileId"),
+            )
+        )
+
+    return CollectionManifest(
+        name=info.get("name", slug),
+        author=(info.get("user") or {}).get("name", ""),
+        summary=info.get("summary", ""),
+        domain_name=game_domain,
+        install_instructions=info.get("installInstructions", ""),
+        mods=mods,
+    )

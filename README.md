@@ -82,17 +82,22 @@ lmm
    "Mod Manager Download" button on Nexus Mods once the handler is
    registered. Reorder mods (later = higher priority = wins conflicts),
    then **Deploy**.
-4. **Collections tab** - import a `collection.json` manifest and queue
-   every Nexus-sourced mod for download. There's no way to get that file
-   straight from the website - the "Vortex"/"Add collection" button is a
-   protocol handoff, not a download, and only Vortex or the Nexus Mods App
-   can resolve it (writing `collection.json` into their own profile
-   directory, which you can copy out and import here). If you'd rather
-   skip that entirely, open the collection's **Mods** tab on the website
-   and download each mod individually - those are ordinary `nxm://` links
-   LMM already handles. Bulk collection downloads via the Collections tab
-   also need a **premium** Nexus API key - see the note in
-   `src/lmm/nexus/collections.py` for why non-premium can't automate this.
+4. **Collections tab** - paste a collection's URL (e.g.
+   `https://www.nexusmods.com/fallout4/collections/5atq9t`) and click
+   **Fetch from Nexus** to pull its mod list directly from Nexus's own
+   GraphQL API - the same data the collection's page itself renders with,
+   so it needs no Vortex, no login flow, and works for any account tier.
+   Then **Queue downloads for selected game**, which *is* gated to
+   **premium** API keys - that's the same restriction Nexus's own tools
+   apply to bulk downloads, not something LMM adds; see the note in
+   `src/lmm/nexus/collections.py`. On a free key, open the collection's
+   **Mods** tab on the website instead and download each mod individually
+   - those are ordinary `nxm://` links LMM already handles.
+
+   If the GraphQL fetch ever breaks (it's an undocumented, best-effort
+   query), **Import collection.json…** still works as a fallback - get
+   that file by running Vortex/the Nexus Mods App once to fetch the
+   collection and copying `collection.json` out of its profile directory.
 
 ## Project layout
 
