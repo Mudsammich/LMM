@@ -1,5 +1,7 @@
 # LMM - Linux Mod Manager
 
+![LMM banner](docs/screenshots/banner.png)
+
 A mod manager for Linux (built and tested with CachyOS in mind) that ties
 together three things Linux modding usually leaves you to glue by hand:
 
@@ -29,6 +31,16 @@ you've since replaced by hand.
 This mirrors the "simple" deployment mode of MO2/Vortex, minus the
 Windows-only virtual filesystem trick - on Linux, symlinks into the real
 game directory are the reliable option under Proton.
+
+## Screenshots
+
+| Games | Mods |
+| --- | --- |
+| ![Games tab](docs/screenshots/games-tab.png) | ![Mods tab](docs/screenshots/mods-tab.png) |
+
+| Downloads | Settings |
+| --- | --- |
+| ![Downloads tab](docs/screenshots/downloads-tab.png) | ![Settings tab](docs/screenshots/settings-tab.png) |
 
 ## Installing
 

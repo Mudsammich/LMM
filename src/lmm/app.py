@@ -6,6 +6,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from .gui import theme
 from .gui.ipc import NxmIpcServer, send_to_running_instance
 from .gui.main_window import MainWindow
 
@@ -25,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_gui(app: QApplication, initial_url: str | None = None) -> int:
+    theme.apply_theme(app)
     window = MainWindow()
 
     ipc_server = NxmIpcServer(window)

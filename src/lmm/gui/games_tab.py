@@ -4,6 +4,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
+    QHeaderView,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -28,7 +29,9 @@ class GamesTab(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setStretchLastSection(False)
 
         add_btn = QPushButton("Add Game…")
         edit_btn = QPushButton("Edit…")

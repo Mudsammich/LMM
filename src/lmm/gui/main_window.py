@@ -1,8 +1,9 @@
 """Top-level window: ties the tabs together over a shared AppContext."""
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMainWindow, QTabWidget
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QVBoxLayout, QWidget
 
+from .banner import VaporwaveBanner
 from .context import AppContext
 from .collections_tab import CollectionsTab
 from .downloads_tab import DownloadsTab
@@ -16,7 +17,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.ctx = ctx or AppContext()
         self.setWindowTitle("LMM - Linux Mod Manager")
-        self.resize(1000, 650)
+        self.resize(1050, 700)
 
         tabs = QTabWidget()
         self.games_tab = GamesTab(self.ctx)
@@ -31,7 +32,13 @@ class MainWindow(QMainWindow):
         tabs.addTab(self.collections_tab, "Collections")
         tabs.addTab(self.settings_tab, "Settings")
 
-        self.setCentralWidget(tabs)
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(VaporwaveBanner())
+        layout.addWidget(tabs)
+        self.setCentralWidget(central)
 
     def handle_nxm_url(self, url: str) -> None:
         self.downloads_tab.handle_nxm_url(url)
