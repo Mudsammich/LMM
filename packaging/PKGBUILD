@@ -36,6 +36,7 @@ depends=(
 optdepends=(
 	'unrar: better .rar mod archive support'
 	'proton-ge-custom: wider Proton compatibility for running mod tools'
+	'bubblewrap: network-isolated game launches (Games > Launch Game)'
 )
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 source=()

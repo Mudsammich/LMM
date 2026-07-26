@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
 
 from .context import AppContext
 from .dialogs import AddEditGameDialog
+from ..proton import prefix as proton_prefix
+from ..proton.sandbox import NetworkIsolationUnavailable
 
-COLUMNS = ["Name", "Nexus domain", "Install path", "Proton prefix", "Deploy method"]
+COLUMNS = ["Name", "Nexus domain", "Install path", "Proton prefix", "Network", "Deploy method"]
 
 
 class GamesTab(QWidget):
@@ -36,14 +38,18 @@ class GamesTab(QWidget):
         add_btn = QPushButton("Add Game…")
         edit_btn = QPushButton("Edit…")
         remove_btn = QPushButton("Remove")
+        launch_btn = QPushButton("Launch Game")
+        launch_btn.setProperty("role", "primary")
         add_btn.clicked.connect(self._add_game)
         edit_btn.clicked.connect(self._edit_game)
         remove_btn.clicked.connect(self._remove_game)
+        launch_btn.clicked.connect(self._launch_game)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_btn)
         button_row.addWidget(edit_btn)
         button_row.addWidget(remove_btn)
+        button_row.addWidget(launch_btn)
         button_row.addStretch(1)
 
         layout = QVBoxLayout(self)
@@ -62,6 +68,7 @@ class GamesTab(QWidget):
                 game.nexus_domain,
                 game.install_path,
                 game.proton_prefix or "(none)",
+                "isolated (no network)" if game.network_isolated else "normal",
                 game.deploy_method.value,
             ]
             for col, value in enumerate(values):
@@ -93,6 +100,42 @@ class GamesTab(QWidget):
             updated = dialog.result_game()
             if updated:
                 self.ctx.add_or_update_game(updated)
+
+    def _launch_game(self) -> None:
+        game_id = self._selected_game_id()
+        if not game_id:
+            QMessageBox.information(self, "Launch Game", "Select a game first.")
+            return
+        game = self.ctx.config.games[game_id]
+
+        missing = [
+            label
+            for label, value in (
+                ("game executable", game.launch_executable),
+                ("Proton prefix", game.proton_prefix),
+                ("Proton build path", game.proton_version_path),
+            )
+            if not value
+        ]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Launch Game",
+                f"Set the {', '.join(missing)} for this game first (Edit…).",
+            )
+            return
+
+        try:
+            proton_prefix.run_in_prefix(
+                exe_path=game.launch_executable,
+                prefix_path=game.proton_prefix,
+                proton_path=game.proton_version_path,
+                network_isolated=game.network_isolated,
+            )
+        except NetworkIsolationUnavailable as exc:
+            QMessageBox.critical(self, "Launch Game", str(exc))
+        except (FileNotFoundError, RuntimeError) as exc:
+            QMessageBox.critical(self, "Launch Game", str(exc))
 
     def _remove_game(self) -> None:
         game_id = self._selected_game_id()

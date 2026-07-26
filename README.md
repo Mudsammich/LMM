@@ -99,6 +99,17 @@ lmm
    query), **Import collection.json…** still works as a fallback - get
    that file by running Vortex/the Nexus Mods App once to fetch the
    collection and copying `collection.json` out of its profile directory.
+5. **Launching the game** - set a game's executable and click **Launch
+   Game** on the Games tab. LMM launches Proton directly (never through
+   the Steam client itself), so Steam has no visibility into the launch
+   regardless of whether the game is also owned there. Check **Launch
+   with no network access** on a game (Add/Edit Game) to run it - and
+   any tool run in its prefix - inside a network namespace with no
+   interfaces at all (via `bubblewrap`), a kernel-level guarantee rather
+   than a firewall rule: nothing the game, Proton, or any of their child
+   processes do can reach the network. Requires the `bubblewrap` package;
+   LMM refuses to launch rather than silently launch without isolation
+   if it isn't installed.
 
 ## Project layout
 

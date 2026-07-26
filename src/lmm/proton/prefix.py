@@ -6,6 +6,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from . import sandbox
 from .steam import find_steam_root
 
 
@@ -34,10 +35,20 @@ def run_in_prefix(
     args: list[str] | None = None,
     steam_root: Path | None = None,
     extra_env: dict[str, str] | None = None,
+    network_isolated: bool = False,
 ) -> subprocess.Popen:
     """Launches ``exe_path`` inside ``prefix_path`` via the given Proton
-    build, exactly as Steam would set it up. Useful for running modding
-    tools (LOOT, xEdit, BodySlide, FNIS) against a modded game's prefix.
+    build, exactly as Steam would set it up. Useful both for running the
+    game itself and for modding tools (LOOT, xEdit, BodySlide, FNIS)
+    against a modded game's prefix. Never goes through the Steam client
+    itself - only Steam launching something through its own machinery
+    makes it visible there, and this doesn't do that.
+
+    ``network_isolated=True`` runs the whole thing inside a network
+    namespace with no interfaces at all (see ``lmm.proton.sandbox``) -
+    nothing spawned by Proton, wine, or the game can make any outbound
+    connection. Raises NetworkIsolationUnavailable rather than silently
+    launching without isolation if bubblewrap isn't installed.
 
     Returns the Popen handle so the caller can decide whether to wait,
     stream output, or fire-and-forget.
@@ -62,4 +73,6 @@ def run_in_prefix(
         env.update(extra_env)
 
     cmd = [str(proton_script), "run", str(exe_path), *(args or [])]
+    if network_isolated:
+        cmd = sandbox.wrap_command(cmd)
     return subprocess.Popen(cmd, env=env)
