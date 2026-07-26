@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from . import context as context_module
 from .downloads_tab import DownloadsTab
-from ..nexus.api import NexusAPIError
+from ..nexus.api import NexusAPIError, NexusRateLimitError
 from ..nexus.collections import (
     CollectionAPIUnavailable,
     CollectionManifest,
@@ -172,24 +173,55 @@ class CollectionsTab(QWidget):
             )
             return
 
-        skipped = 0
-        queued = 0
-        for mod in self._manifest.mods:
-            if mod.optional:
-                continue
-            if not mod.is_nexus:
-                skipped += 1
-                continue
-            self.downloads_tab.queue_nexus_file(
-                mod.domain_name or self._manifest.domain_name,
-                mod.mod_id,
-                mod.file_id,
-                mod.name,
-                game_id=game_id,
-            )
-            queued += 1
+        to_queue = [m for m in self._manifest.mods if not m.optional and m.is_nexus]
+        skipped = sum(1 for m in self._manifest.mods if not m.optional and not m.is_nexus)
 
-        message = f"Queued {queued} download(s)."
+        if len(to_queue) > 25:
+            reply = QMessageBox.question(
+                self,
+                "Queue downloads",
+                f"This will resolve and queue {len(to_queue)} mods one at a time - it can "
+                "take a while and may run into Nexus's API rate limit partway through "
+                "(LMM will stop cleanly and report how far it got if so). Continue?",
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        queued = 0
+        failures: list[str] = []
+        rate_limited = False
+        for i, mod in enumerate(to_queue, start=1):
+            self.summary_label.setText(f"Queueing {i}/{len(to_queue)}: {mod.name}…")
+            QApplication.processEvents()
+            try:
+                error = self.downloads_tab.queue_nexus_file(
+                    mod.domain_name or self._manifest.domain_name,
+                    mod.mod_id,
+                    mod.file_id,
+                    mod.name,
+                    game_id=game_id,
+                )
+            except NexusRateLimitError:
+                rate_limited = True
+                break
+            if error:
+                failures.append(f"{mod.name}: {error}")
+            else:
+                queued += 1
+
+        self.summary_label.setText(
+            f"{self._manifest.name} by {self._manifest.author or 'unknown'} - {len(self._manifest.mods)} mods"
+        )
+
+        message = f"Queued {queued} of {len(to_queue)} download(s)."
         if skipped:
             message += f" Skipped {skipped} non-Nexus source(s) - download those manually."
+        if rate_limited:
+            message += (
+                f"\n\nStopped early: hit Nexus's API rate limit after {queued} mod(s). "
+                "Wait for it to reset and click Queue downloads again to pick up the rest."
+            )
+        elif failures:
+            shown = "\n".join(failures[:5])
+            message += f"\n\n{len(failures)} mod(s) failed to resolve, e.g.:\n{shown}"
         QMessageBox.information(self, "Collections", message)
