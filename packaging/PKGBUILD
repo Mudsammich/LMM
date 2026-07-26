@@ -36,17 +36,17 @@ source=()
 sha256sums=()
 
 pkgver() {
-	cd "$startdir"
+	cd "$startdir/.."
 	printf '%s' "$pkgver"
 }
 
 build() {
-	cd "$startdir"
+	cd "$startdir/.."
 	python -m build --wheel --no-isolation
 }
 
 package() {
-	cd "$startdir"
+	cd "$startdir/.."
 	python -m installer --destdir="$pkgdir" dist/*.whl
 	install -Dm644 packaging/lmm.desktop "$pkgdir/usr/share/applications/lmm.desktop"
 }
