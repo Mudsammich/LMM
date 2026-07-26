@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QMessageBox,
@@ -38,13 +39,16 @@ class ModsTab(QWidget):
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)  # Name
 
         install_btn = QPushButton("Install from archive…")
         remove_btn = QPushButton("Remove")
         up_btn = QPushButton("Move Up")
         down_btn = QPushButton("Move Down")
         deploy_btn = QPushButton("Deploy")
+        deploy_btn.setProperty("role", "primary")
         undeploy_btn = QPushButton("Undeploy")
         conflicts_btn = QPushButton("Show Conflicts")
 
@@ -66,6 +70,7 @@ class ModsTab(QWidget):
         top_row.addWidget(self.game_combo, 1)
 
         self.status_label = QLabel("")
+        self.status_label.setProperty("role", "status")
 
         layout = QVBoxLayout(self)
         layout.addLayout(top_row)

@@ -45,6 +45,7 @@ class SettingsTab(QWidget):
         register_btn.clicked.connect(self._register_handler)
 
         self.status_label = QLabel("")
+        self.status_label.setProperty("role", "status")
 
         form = QFormLayout()
         form.addRow("Nexus Mods API key", key_row)

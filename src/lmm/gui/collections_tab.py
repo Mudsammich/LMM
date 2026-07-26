@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -35,6 +36,7 @@ class CollectionsTab(QWidget):
         import_btn = QPushButton("Import collection.json…")
         import_btn.clicked.connect(self._import)
         self.install_btn = QPushButton("Queue downloads for selected game")
+        self.install_btn.setProperty("role", "primary")
         self.install_btn.clicked.connect(self._queue_all)
         self.install_btn.setEnabled(False)
 
@@ -48,7 +50,9 @@ class CollectionsTab(QWidget):
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Mod
 
         top_row = QHBoxLayout()
         top_row.addWidget(import_btn)

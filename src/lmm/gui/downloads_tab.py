@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -55,6 +56,7 @@ class DownloadsTab(QWidget):
         self.link_edit = QLineEdit()
         self.link_edit.setPlaceholderText("paste an nxm:// link here, or a direct https:// URL")
         go_btn = QPushButton("Download")
+        go_btn.setProperty("role", "primary")
         go_btn.clicked.connect(self._start_from_input)
 
         input_row = QHBoxLayout()
@@ -66,7 +68,9 @@ class DownloadsTab(QWidget):
         self.table.setHorizontalHeaderLabels(["Name", "Progress", "Status"])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table.horizontalHeader().setStretchLastSection(True)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name
 
         layout = QVBoxLayout(self)
         layout.addLayout(input_row)
