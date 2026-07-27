@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -27,6 +26,7 @@ from PySide6.QtWidgets import (
 from . import context as context_module
 from .. import paths
 from ..models import ModSource
+from ..mods.manager import ModManagerError
 from ..nexus.api import NexusAPIError, NexusRateLimitError
 from ..nexus.collections import CollectionAPIUnavailable, resolve_revision_bundle_url
 from ..nexus.nxm import NxmCollectionLink, NxmModLink, NxmParseError, parse_nxm
@@ -227,18 +227,18 @@ class DownloadsTab(QWidget):
         game = self.ctx.config.games.get(game_id)
         if not game:
             return
-        reply = QMessageBox.question(
-            self, "Install mod", f"Downloaded for {game.name}. Install it now?"
-        )
-        if reply != QMessageBox.Yes:
-            return
-        default_name = Path(dest_path).stem
-        name, ok = QInputDialog.getText(self, "Mod name", "Display name:", text=default_name)
-        if not ok or not name:
-            return
+
+        name = self.table.item(row, 0).text() if row is not None else Path(dest_path).stem
         manager = self.ctx.mod_manager(game_id)
-        manager.install_from_archive(dest_path, name)
+        try:
+            manager.install_from_archive(dest_path, name)
+        except ModManagerError as exc:
+            if row is not None:
+                self.table.item(row, 2).setText(f"install failed: {exc}")
+            return
         self.ctx.notify_mods_changed(game_id)
+        if row is not None:
+            self.table.item(row, 2).setText("installed")
 
     def _on_error(self, task_id: str, message: str) -> None:
         row = self._rows.get(task_id)
