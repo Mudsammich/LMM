@@ -25,6 +25,7 @@ from ..mods.archive import SUPPORTED_EXTENSIONS
 from ..mods.manager import ModManagerError
 
 COLUMNS = ["On", "Priority", "Name", "Source"]
+PLUGIN_COLUMNS = ["On", "Plugin"]
 
 
 class ModsTab(QWidget):
@@ -72,11 +73,14 @@ class ModsTab(QWidget):
         self.status_label = QLabel("")
         self.status_label.setProperty("role", "status")
 
+        self.plugins_section = self._build_plugins_section()
+
         layout = QVBoxLayout(self)
         layout.addLayout(top_row)
         layout.addLayout(button_row)
         layout.addWidget(self.table)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.plugins_section)
 
         self.table.itemChanged.connect(self._on_item_changed)
 
@@ -110,6 +114,7 @@ class ModsTab(QWidget):
         game_id = self._current_game_id()
         self.table.setRowCount(0)
         if not game_id:
+            self._refresh_plugins()
             return
         manager = self.ctx.mod_manager(game_id)
         mods = manager.list_mods()
@@ -128,6 +133,7 @@ class ModsTab(QWidget):
                 source = f"nexus #{mod.source.mod_id}"
             self.table.setItem(row, 3, QTableWidgetItem(source))
         self.table.blockSignals(False)
+        self._refresh_plugins()
 
     def _on_item_changed(self, item) -> None:
         if item.column() != 0:
@@ -242,3 +248,143 @@ class ModsTab(QWidget):
         for path, mod_ids in sorted(conflicts.items()):
             lines.append(f"{path}\n    provided by: {', '.join(mod_ids)} (winner: {mod_ids[-1]})")
         QMessageBox.information(self, "Conflicts", "\n\n".join(lines))
+
+    # -- plugin load order (Bethesda-style games) -----------------------------------------------------
+
+    def _build_plugins_section(self) -> QWidget:
+        section = QWidget()
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(0, 12, 0, 0)
+
+        header = QLabel("Plugin Load Order (Bethesda-style games)")
+        header.setProperty("role", "section")
+
+        sync_btn = QPushButton("Sync from Mods")
+        up_btn = QPushButton("Move Up")
+        down_btn = QPushButton("Move Down")
+        write_btn = QPushButton("Write Plugins.txt")
+        write_btn.setProperty("role", "primary")
+        import_btn = QPushButton("Import from Plugins.txt")
+
+        sync_btn.clicked.connect(self._sync_plugins)
+        up_btn.clicked.connect(lambda: self._move_plugin(-1))
+        down_btn.clicked.connect(lambda: self._move_plugin(1))
+        write_btn.clicked.connect(self._write_plugins_txt)
+        import_btn.clicked.connect(self._import_plugins_txt)
+
+        plugin_button_row = QHBoxLayout()
+        for b in (sync_btn, up_btn, down_btn, write_btn, import_btn):
+            plugin_button_row.addWidget(b)
+        plugin_button_row.addStretch(1)
+
+        self.plugins_table = QTableWidget(0, len(PLUGIN_COLUMNS))
+        self.plugins_table.setHorizontalHeaderLabels(PLUGIN_COLUMNS)
+        self.plugins_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.plugins_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        plugins_header = self.plugins_table.horizontalHeader()
+        plugins_header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        plugins_header.setStretchLastSection(False)
+        self.plugins_table.itemChanged.connect(self._on_plugin_item_changed)
+
+        self.plugins_status_label = QLabel("")
+        self.plugins_status_label.setProperty("role", "status")
+
+        layout.addWidget(header)
+        layout.addLayout(plugin_button_row)
+        layout.addWidget(self.plugins_table)
+        layout.addWidget(self.plugins_status_label)
+        return section
+
+    def _refresh_plugins(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            self.plugins_section.setVisible(False)
+            return
+        game = self.ctx.config.games[game_id]
+        self.plugins_section.setVisible(game.manages_plugins)
+        if not game.manages_plugins:
+            return
+
+        manager = self.ctx.mod_manager(game_id)
+        plugins = manager.list_plugins()
+        self.plugins_table.blockSignals(True)
+        self.plugins_table.setRowCount(len(plugins))
+        for row, plugin in enumerate(plugins):
+            enabled_item = QTableWidgetItem()
+            enabled_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            enabled_item.setCheckState(Qt.Checked if plugin.enabled else Qt.Unchecked)
+            enabled_item.setData(1000, plugin.name)
+            self.plugins_table.setItem(row, 0, enabled_item)
+            self.plugins_table.setItem(row, 1, QTableWidgetItem(plugin.name))
+        self.plugins_table.blockSignals(False)
+
+    def _on_plugin_item_changed(self, item) -> None:
+        if item.column() != 0:
+            return
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        manager.set_plugin_enabled(item.data(1000), item.checkState() == Qt.Checked)
+
+    def _selected_plugin_name(self) -> str | None:
+        rows = self.plugins_table.selectionModel().selectedRows()
+        if not rows:
+            return None
+        return self.plugins_table.item(rows[0].row(), 0).data(1000)
+
+    def _sync_plugins(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        plugins = manager.sync_plugins_from_mods()
+        self._refresh_plugins()
+        self.plugins_status_label.setText(f"Synced {len(plugins)} plugin(s) from enabled mods.")
+
+    def _move_plugin(self, delta: int) -> None:
+        game_id = self._current_game_id()
+        name = self._selected_plugin_name()
+        if not game_id or not name:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        ordered = [p.name for p in manager.list_plugins()]
+        idx = ordered.index(name)
+        new_idx = max(0, min(len(ordered) - 1, idx + delta))
+        if new_idx == idx:
+            return
+        ordered.insert(new_idx, ordered.pop(idx))
+        manager.reorder_plugins(ordered)
+        self._refresh_plugins()
+        self._select_plugin_row(name)
+
+    def _select_plugin_row(self, name: str) -> None:
+        for row in range(self.plugins_table.rowCount()):
+            if self.plugins_table.item(row, 0).data(1000) == name:
+                self.plugins_table.selectRow(row)
+                return
+
+    def _write_plugins_txt(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        try:
+            path = manager.write_plugins_txt()
+        except ModManagerError as exc:
+            QMessageBox.critical(self, "Write Plugins.txt", str(exc))
+            return
+        self.plugins_status_label.setText(f"Wrote {path}")
+
+    def _import_plugins_txt(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        try:
+            plugins = manager.import_plugins_from_txt()
+        except ModManagerError as exc:
+            QMessageBox.critical(self, "Import from Plugins.txt", str(exc))
+            return
+        self._refresh_plugins()
+        self.plugins_status_label.setText(f"Imported {len(plugins)} plugin(s) from Plugins.txt.")

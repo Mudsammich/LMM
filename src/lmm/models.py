@@ -29,6 +29,7 @@ class Game:
     proton_version_path: str = ""  # path to the Proton build used to run tools
     deploy_method: DeployMethod = DeployMethod.SYMLINK
     manages_plugins: bool = False  # Bethesda-style plugins.txt / load order
+    plugins_txt_path: str = ""  # e.g. <prefix>/drive_c/users/steamuser/AppData/Local/Fallout4/Plugins.txt
     launch_executable: str = ""  # path to the game's .exe, for Launch Game / run_in_prefix
     network_isolated: bool = False  # launch this game (and any tool run in its prefix) with no network access at all
 

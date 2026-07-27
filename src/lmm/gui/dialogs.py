@@ -68,6 +68,10 @@ class AddEditGameDialog(QDialog):
         self.manages_plugins_check = QCheckBox("Manage Bethesda-style plugin load order")
         if game:
             self.manages_plugins_check.setChecked(game.manages_plugins)
+        self.plugins_txt_edit = QLineEdit(game.plugins_txt_path if game else "")
+        self.plugins_txt_edit.setPlaceholderText(
+            "<prefix>/drive_c/users/steamuser/AppData/Local/Fallout4/Plugins.txt"
+        )
         self.launch_exe_edit = QLineEdit(game.launch_executable if game else "")
         self.network_isolated_check = QCheckBox("Launch with no network access (requires bubblewrap)")
         self.network_isolated_check.setToolTip(
@@ -94,6 +98,7 @@ class AddEditGameDialog(QDialog):
         form.addRow("Game executable (.exe)", _browse_row(self.launch_exe_edit, directory=False, parent=self))
         form.addRow("Deploy method", self.deploy_method_combo)
         form.addRow(self.manages_plugins_check)
+        form.addRow("Plugins.txt path", _browse_row(self.plugins_txt_edit, directory=False, parent=self))
         form.addRow(self.network_isolated_check)
         form.addRow(detect_button)
 
@@ -150,6 +155,7 @@ class AddEditGameDialog(QDialog):
             proton_version_path=self.proton_version_edit.text().strip(),
             deploy_method=DeployMethod(self.deploy_method_combo.currentText()),
             manages_plugins=self.manages_plugins_check.isChecked(),
+            plugins_txt_path=self.plugins_txt_edit.text().strip(),
             launch_executable=self.launch_exe_edit.text().strip(),
             network_isolated=self.network_isolated_check.isChecked(),
         )

@@ -110,6 +110,19 @@ lmm
    processes do can reach the network. Requires the `bubblewrap` package;
    LMM refuses to launch rather than silently launch without isolation
    if it isn't installed.
+6. **Plugin load order** (Bethesda games - Skyrim SE, Fallout 4, etc.) -
+   check **Manage Bethesda-style plugin load order** on a game and set
+   its **Plugins.txt path** (typically
+   `<prefix>/drive_c/users/steamuser/AppData/Local/<Game>/Plugins.txt`).
+   The Mods tab gains a Plugin Load Order section: **Sync from Mods**
+   detects every `.esp`/`.esm`/`.esl` your enabled mods provide,
+   **Move Up**/**Move Down** reorders them, and **Write Plugins.txt**
+   saves it in the correct `*name.esp` (active) format. LMM does *not*
+   attempt LOOT-style master-dependency auto-sorting - that needs
+   LOOT's own community masterlist rules, which can't be replicated
+   reliably here. Run LOOT itself against the prefix (via a tool launch,
+   or a native Linux LOOT build) for real sorting, then **Import from
+   Plugins.txt** to pull whatever order it left behind back into LMM.
 
 ## Project layout
 
