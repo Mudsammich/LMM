@@ -68,6 +68,20 @@ class AddEditGameDialog(QDialog):
         self.manages_plugins_check = QCheckBox("Manage Bethesda-style plugin load order")
         if game:
             self.manages_plugins_check.setChecked(game.manages_plugins)
+        self.plugins_txt_edit = QLineEdit(game.plugins_txt_path if game else "")
+        self.plugins_txt_edit.setPlaceholderText(
+            "<prefix>/drive_c/users/steamuser/AppData/Local/Fallout4/Plugins.txt"
+        )
+        self.launch_exe_edit = QLineEdit(game.launch_executable if game else "")
+        self.network_isolated_check = QCheckBox("Launch with no network access (requires bubblewrap)")
+        self.network_isolated_check.setToolTip(
+            "Runs the game (and any tool run in its prefix) inside a network "
+            "namespace with no interfaces at all - a kernel-level guarantee "
+            "that nothing it does can reach the network, not a firewall rule "
+            "that could be misconfigured or bypassed."
+        )
+        if game:
+            self.network_isolated_check.setChecked(game.network_isolated)
 
         detect_button = QPushButton("Detect from Steam…")
         detect_button.clicked.connect(self._detect_from_steam)
@@ -81,8 +95,11 @@ class AddEditGameDialog(QDialog):
         form.addRow("Steam AppID", self.appid_edit)
         form.addRow("Proton prefix (pfx) path", _browse_row(self.prefix_edit, parent=self))
         form.addRow("Proton build path", _browse_row(self.proton_version_edit, parent=self))
+        form.addRow("Game executable (.exe)", _browse_row(self.launch_exe_edit, directory=False, parent=self))
         form.addRow("Deploy method", self.deploy_method_combo)
         form.addRow(self.manages_plugins_check)
+        form.addRow("Plugins.txt path", _browse_row(self.plugins_txt_edit, directory=False, parent=self))
+        form.addRow(self.network_isolated_check)
         form.addRow(detect_button)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -138,6 +155,9 @@ class AddEditGameDialog(QDialog):
             proton_version_path=self.proton_version_edit.text().strip(),
             deploy_method=DeployMethod(self.deploy_method_combo.currentText()),
             manages_plugins=self.manages_plugins_check.isChecked(),
+            plugins_txt_path=self.plugins_txt_edit.text().strip(),
+            launch_executable=self.launch_exe_edit.text().strip(),
+            network_isolated=self.network_isolated_check.isChecked(),
         )
         self.accept()
 

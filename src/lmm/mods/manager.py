@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .. import paths
 from ..models import DeployMethod, Game, InstalledMod, ModSource
-from . import archive, deploy
+from . import archive, deploy, plugins as plugins_module
 
 
 def slugify(text: str) -> str:
@@ -133,11 +133,11 @@ class ModManager:
 
     # -- deployment -----------------------------------------------------
 
+    def _enabled_mods_sorted(self) -> list[InstalledMod]:
+        return sorted((m for m in self._mods.values() if m.enabled), key=lambda m: m.priority)
+
     def deploy(self) -> deploy.DeployResult:
-        enabled = sorted(
-            (m for m in self._mods.values() if m.enabled), key=lambda m: m.priority
-        )
-        plan = deploy.build_plan(Path(self.game.mods_dir), enabled)
+        plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
         target_dir = Path(self.game.deploy_target())
         return deploy.apply_plan(plan, target_dir, self.state_dir, self.game.deploy_method)
 
@@ -146,8 +146,56 @@ class ModManager:
         return deploy.undeploy_all(target_dir, self.state_dir)
 
     def preview_conflicts(self) -> dict[str, list[str]]:
-        enabled = sorted(
-            (m for m in self._mods.values() if m.enabled), key=lambda m: m.priority
-        )
-        plan = deploy.build_plan(Path(self.game.mods_dir), enabled)
+        plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
         return plan.conflicts
+
+    # -- plugin load order (Bethesda-style games) -----------------------------------------------------
+
+    def list_plugins(self) -> list[plugins_module.Plugin]:
+        return plugins_module.load_plugins(self.state_dir)
+
+    def sync_plugins_from_mods(self) -> list[plugins_module.Plugin]:
+        """Re-detects plugins from the currently enabled mods' files (via
+        the same deploy plan used for real deployment) and merges them
+        into the persisted plugin order, keeping existing order/enabled
+        state and dropping plugins no longer provided by anything."""
+        plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
+        detected = plugins_module.detect_plugins(plan.links)
+        current = plugins_module.load_plugins(self.state_dir)
+        updated = plugins_module.sync_plugins(current, detected)
+        plugins_module.save_plugins(self.state_dir, updated)
+        return updated
+
+    def set_plugin_enabled(self, name: str, enabled: bool) -> None:
+        current = plugins_module.load_plugins(self.state_dir)
+        for p in current:
+            if p.name == name:
+                p.enabled = enabled
+                break
+        else:
+            raise ModManagerError(f"No such plugin: {name}")
+        plugins_module.save_plugins(self.state_dir, current)
+
+    def reorder_plugins(self, ordered_names: list[str]) -> None:
+        current = {p.name: p for p in plugins_module.load_plugins(self.state_dir)}
+        missing = [n for n in ordered_names if n not in current]
+        if missing:
+            raise ModManagerError(f"Unknown plugin(s) in reorder list: {missing}")
+        plugins_module.save_plugins(self.state_dir, [current[n] for n in ordered_names])
+
+    def write_plugins_txt(self) -> Path:
+        if not self.game.plugins_txt_path:
+            raise ModManagerError("No Plugins.txt path set for this game (Edit Game).")
+        current = plugins_module.load_plugins(self.state_dir)
+        path = Path(self.game.plugins_txt_path)
+        plugins_module.write_plugins_txt(path, current)
+        return path
+
+    def import_plugins_from_txt(self) -> list[plugins_module.Plugin]:
+        """Re-syncs LMM's plugin state from Plugins.txt - e.g. after
+        running LOOT, which sorts and rewrites that file directly."""
+        if not self.game.plugins_txt_path:
+            raise ModManagerError("No Plugins.txt path set for this game (Edit Game).")
+        imported = plugins_module.import_from_plugins_txt(self.game.plugins_txt_path)
+        plugins_module.save_plugins(self.state_dir, imported)
+        return imported

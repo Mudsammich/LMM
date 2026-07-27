@@ -5,10 +5,16 @@
 # Build + install with:
 #   cd packaging && makepkg -si
 #
-# Several Python dependencies below only exist in the AUR. Build them
-# first with an AUR helper (e.g. `paru -S python-vdf python-py7zr
-# python-rarfile`) or let your AUR helper resolve them automatically if
-# you run `paru -Bi packaging/` instead of makepkg directly.
+# python-vdf is AUR-only. Build it first with an AUR helper (e.g.
+# `paru -S python-vdf`) or let your AUR helper resolve it automatically if
+# you run `paru -Bi packaging/` instead of makepkg directly. Everything
+# else below (including pyside6, python-py7zr, python-rarfile) is in the
+# official [extra] repo.
+#
+# pkgver() derives from the current git commit (0.1.0.r<count>.g<hash>),
+# not a hardcoded string, so every new commit produces a version AUR
+# helpers recognize as new - `paru -Bi` won't silently skip rebuilding a
+# stale cached version after you pull new source changes.
 
 pkgname=lmm
 pkgver=0.1.0
@@ -19,7 +25,7 @@ url="https://github.com/mudsammich/lmm"
 license=('MIT')
 depends=(
 	'python'
-	'python-pyside6'
+	'pyside6'
 	'python-requests'
 	'python-platformdirs'
 	'python-vdf'
@@ -30,14 +36,19 @@ depends=(
 optdepends=(
 	'unrar: better .rar mod archive support'
 	'proton-ge-custom: wider Proton compatibility for running mod tools'
+	'bubblewrap: network-isolated game launches (Games > Launch Game)'
 )
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 source=()
 sha256sums=()
 
 pkgver() {
-	cd "$startdir/.."
-	printf '%s' "$pkgver"
+	cd "$startdir/.." || { echo "pkgver(): cannot cd to \$startdir/.. ($startdir/..)" >&2; return 1; }
+	if ! git rev-parse --git-dir >/dev/null 2>&1; then
+		echo "pkgver(): $(pwd) is not a git repository - \$startdir is '$startdir'" >&2
+		return 1
+	fi
+	printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {

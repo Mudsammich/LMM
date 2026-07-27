@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from . import context as context_module
 from .. import paths
 from ..models import ModSource
-from ..nexus.api import NexusAPIError
+from ..nexus.api import NexusAPIError, NexusRateLimitError
 from ..nexus.collections import CollectionAPIUnavailable, resolve_revision_bundle_url
 from ..nexus.nxm import NxmCollectionLink, NxmModLink, NxmParseError, parse_nxm
 
@@ -146,24 +146,33 @@ class DownloadsTab(QWidget):
 
     def queue_nexus_file(
         self, domain: str, mod_id: int, file_id: int, display_name: str, game_id: str | None = None
-    ) -> None:
+    ) -> str | None:
         """Resolves and queues a specific Nexus mod file directly (used by
         the Collections tab, where there's no nxm key/expires pair - this
-        only works for premium API keys)."""
+        only works for premium API keys).
+
+        Returns an error message on failure instead of showing a dialog
+        itself, so a caller queueing many files in a loop (a whole
+        collection) can aggregate failures into one summary instead of one
+        modal per mod. NexusRateLimitError is left to propagate uncaught,
+        since a caller queueing many files needs to stop the loop on it
+        rather than treat it like any other per-mod failure.
+        """
         client = self.ctx.nexus_client()
         try:
             mirrors = client.get_download_links(domain, mod_id, file_id)
+        except NexusRateLimitError:
+            raise
         except NexusAPIError as exc:
-            QMessageBox.critical(self, "Download failed", f"{display_name}: {exc}")
-            return
+            return str(exc)
         if not mirrors:
-            QMessageBox.critical(self, "Download failed", f"{display_name}: no mirrors returned.")
-            return
+            return "no mirrors returned"
         task_id = str(uuid.uuid4())
         source = ModSource(kind="nexus", mod_id=mod_id, file_id=file_id)
         self._queue_download(
             task_id, display_name, mirrors[0]["URI"], paths.download_cache_dir(), source=source, game_id=game_id
         )
+        return None
 
     # -- queueing / progress -----------------------------------------------------
 

@@ -12,6 +12,7 @@ from typing import Any
 import requests
 
 API_BASE = "https://api.nexusmods.com/v1"
+GRAPHQL_URL = "https://api-router.nexusmods.com/graphql"
 USER_AGENT = "LMM/0.1 (Linux mod manager; +https://github.com)"
 
 
@@ -67,6 +68,38 @@ class NexusClient:
                 resp.status_code,
             )
         return resp.json()
+
+    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        """POSTs to Nexus's GraphQL API - the same one nexusmods.com's own
+        frontend calls to render pages like a collection's mod list.
+        Undocumented for third-party use, so query shapes here are
+        best-effort; a schema mismatch surfaces as a NexusAPIError with the
+        raw GraphQL error text rather than failing silently.
+        """
+        try:
+            resp = self.session.post(
+                GRAPHQL_URL,
+                headers=self._headers(),
+                json={"query": query, "variables": variables or {}},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise NexusAPIError(f"Network error contacting Nexus Mods GraphQL API: {exc}") from exc
+        self._record_rate_limit(resp)
+        if resp.status_code == 429:
+            raise NexusRateLimitError("Nexus Mods API rate limit exceeded.", 429)
+        if not resp.ok:
+            raise NexusAPIError(
+                f"Nexus Mods GraphQL API error {resp.status_code}: {resp.text[:500]}",
+                resp.status_code,
+            )
+        payload = resp.json()
+        if payload.get("errors"):
+            raise NexusAPIError(f"Nexus Mods GraphQL API returned errors: {payload['errors']}")
+        return payload.get("data") or {}
+
+    def is_premium(self) -> bool:
+        return bool(self.validate_user().get("is_premium"))
 
     def _record_rate_limit(self, resp: requests.Response) -> None:
         h = resp.headers

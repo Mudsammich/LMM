@@ -51,11 +51,12 @@ cd packaging
 makepkg -si
 ```
 
-Several dependencies (`python-vdf`, `python-py7zr`, `python-rarfile`) live
-in the AUR. Install them with an AUR helper first (`paru -S python-vdf
-python-py7zr python-rarfile`), or build the whole package with an AUR
-helper pointed at `packaging/` so it resolves them for you. `unrar` is an
-optional dependency needed only if you install `.rar` mod archives.
+`python-vdf` is AUR-only - install it with an AUR helper first (`paru -S
+python-vdf`), or build the whole package with an AUR helper pointed at
+`packaging/` so it resolves it for you. Everything else (`pyside6`,
+`python-py7zr`, `python-rarfile`) is in the official `extra` repo, so
+plain `pacman`/`makepkg` handles them. `unrar` is an optional dependency
+needed only if you install `.rar` mod archives.
 
 ### From source (any distro)
 
@@ -82,11 +83,46 @@ lmm
    "Mod Manager Download" button on Nexus Mods once the handler is
    registered. Reorder mods (later = higher priority = wins conflicts),
    then **Deploy**.
-4. **Collections tab** - import a `collection.json` (or the `.zip` Vortex/
-   the site hands out) and queue every Nexus-sourced mod for download.
-   Bulk collection downloads need a **premium** Nexus API key - see the
-   note in `src/lmm/nexus/collections.py` for why non-premium can't
-   automate this.
+4. **Collections tab** - paste a collection's URL (e.g.
+   `https://www.nexusmods.com/fallout4/collections/5atq9t`) and click
+   **Fetch from Nexus** to pull its mod list directly from Nexus's own
+   GraphQL API - the same data the collection's page itself renders with,
+   so it needs no Vortex, no login flow, and works for any account tier.
+   Then **Queue downloads for selected game**, which *is* gated to
+   **premium** API keys - that's the same restriction Nexus's own tools
+   apply to bulk downloads, not something LMM adds; see the note in
+   `src/lmm/nexus/collections.py`. On a free key, open the collection's
+   **Mods** tab on the website instead and download each mod individually
+   - those are ordinary `nxm://` links LMM already handles.
+
+   If the GraphQL fetch ever breaks (it's an undocumented, best-effort
+   query), **Import collection.json…** still works as a fallback - get
+   that file by running Vortex/the Nexus Mods App once to fetch the
+   collection and copying `collection.json` out of its profile directory.
+5. **Launching the game** - set a game's executable and click **Launch
+   Game** on the Games tab. LMM launches Proton directly (never through
+   the Steam client itself), so Steam has no visibility into the launch
+   regardless of whether the game is also owned there. Check **Launch
+   with no network access** on a game (Add/Edit Game) to run it - and
+   any tool run in its prefix - inside a network namespace with no
+   interfaces at all (via `bubblewrap`), a kernel-level guarantee rather
+   than a firewall rule: nothing the game, Proton, or any of their child
+   processes do can reach the network. Requires the `bubblewrap` package;
+   LMM refuses to launch rather than silently launch without isolation
+   if it isn't installed.
+6. **Plugin load order** (Bethesda games - Skyrim SE, Fallout 4, etc.) -
+   check **Manage Bethesda-style plugin load order** on a game and set
+   its **Plugins.txt path** (typically
+   `<prefix>/drive_c/users/steamuser/AppData/Local/<Game>/Plugins.txt`).
+   The Mods tab gains a Plugin Load Order section: **Sync from Mods**
+   detects every `.esp`/`.esm`/`.esl` your enabled mods provide,
+   **Move Up**/**Move Down** reorders them, and **Write Plugins.txt**
+   saves it in the correct `*name.esp` (active) format. LMM does *not*
+   attempt LOOT-style master-dependency auto-sorting - that needs
+   LOOT's own community masterlist rules, which can't be replicated
+   reliably here. Run LOOT itself against the prefix (via a tool launch,
+   or a native Linux LOOT build) for real sorting, then **Import from
+   Plugins.txt** to pull whatever order it left behind back into LMM.
 
 ## Project layout
 

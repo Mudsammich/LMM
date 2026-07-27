@@ -32,6 +32,30 @@ def test_load_missing_file_returns_defaults():
     assert cfg.games == {}
 
 
+def test_loading_old_config_without_newer_game_fields_uses_defaults(tmp_path):
+    """Regression guard: config.json files saved before launch_executable /
+    network_isolated existed must still load cleanly."""
+    import json
+
+    from lmm import paths
+
+    old_game_dict = {
+        "id": "skyrimse",
+        "name": "Skyrim Special Edition",
+        "nexus_domain": "skyrimspecialedition",
+        "install_path": "/games/skyrimse",
+        "deploy_method": "symlink",
+        # no launch_executable / network_isolated keys at all
+    }
+    path = paths.config_file()
+    path.write_text(json.dumps({"games": {"skyrimse": old_game_dict}}))
+
+    loaded = config_module.load()
+    game = loaded.games["skyrimse"]
+    assert game.launch_executable == ""
+    assert game.network_isolated is False
+
+
 def test_deploy_target_with_and_without_subpath():
     g = Game(id="a", name="A", nexus_domain="a", install_path="/games/a", deploy_subpath="Data")
     assert g.deploy_target() == "/games/a/Data"
