@@ -39,6 +39,7 @@ class _DownloadBridge(QObject):
     progress = Signal(str, int, int)
     done = Signal(str, str)
     error = Signal(str, str)
+    install_done = Signal(str, str, bool, str)  # task_id, game_id, success, message
 
 
 class DownloadsTab(QWidget):
@@ -52,6 +53,7 @@ class DownloadsTab(QWidget):
         self.bridge.progress.connect(self._on_progress)
         self.bridge.done.connect(self._on_done)
         self.bridge.error.connect(self._on_error)
+        self.bridge.install_done.connect(self._on_install_done)
 
         self.link_edit = QLineEdit()
         self.link_edit.setPlaceholderText("paste an nxm:// link here, or a direct https:// URL")
@@ -229,16 +231,29 @@ class DownloadsTab(QWidget):
             return
 
         name = self.table.item(row, 0).text() if row is not None else Path(dest_path).stem
-        manager = self.ctx.mod_manager(game_id)
-        try:
-            manager.install_from_archive(dest_path, name)
-        except ModManagerError as exc:
-            if row is not None:
-                self.table.item(row, 2).setText(f"install failed: {exc}")
-            return
-        self.ctx.notify_mods_changed(game_id)
         if row is not None:
-            self.table.item(row, 2).setText("installed")
+            self.table.item(row, 2).setText("installing")
+        manager = self.ctx.mod_manager(game_id)
+
+        def _install_job() -> None:
+            # Runs on lmm-install's single background thread - archive
+            # extraction is slow, and 200 downloads finishing in a burst
+            # would otherwise freeze the GUI running this synchronously.
+            try:
+                manager.install_from_archive(dest_path, name)
+            except ModManagerError as exc:
+                self.bridge.install_done.emit(task_id, game_id, False, str(exc))
+            else:
+                self.bridge.install_done.emit(task_id, game_id, True, "")
+
+        self.ctx.install_executor.submit(_install_job)
+
+    def _on_install_done(self, task_id: str, game_id: str, success: bool, message: str) -> None:
+        row = self._rows.get(task_id)
+        if row is not None:
+            self.table.item(row, 2).setText("installed" if success else f"install failed: {message}")
+        if success:
+            self.ctx.notify_mods_changed(game_id)
 
     def _on_error(self, task_id: str, message: str) -> None:
         row = self._rows.get(task_id)

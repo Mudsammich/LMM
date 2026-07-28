@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import threading
 from pathlib import Path
 
 from .. import paths
@@ -30,6 +31,13 @@ class ModManager:
         self.game = game
         self.state_dir = paths.game_state_dir(game.id)
         self._mods: dict[str, InstalledMod] = {}
+        # Guards self._mods + its on-disk save. Installs can now run on a
+        # background thread (extraction is slow); this keeps that safe
+        # against the GUI thread concurrently removing/enabling/reordering
+        # mods on the same ModManager. Deliberately not held during
+        # archive.extract() itself - only around the in-memory/JSON update -
+        # so a slow extraction can't block a quick GUI-thread action.
+        self._lock = threading.Lock()
         self._load()
 
     # -- persistence -----------------------------------------------------
@@ -56,10 +64,12 @@ class ModManager:
     # -- queries -----------------------------------------------------
 
     def list_mods(self) -> list[InstalledMod]:
-        return sorted(self._mods.values(), key=lambda m: m.priority)
+        with self._lock:
+            return sorted(self._mods.values(), key=lambda m: m.priority)
 
     def get(self, mod_id: str) -> InstalledMod | None:
-        return self._mods.get(mod_id)
+        with self._lock:
+            return self._mods.get(mod_id)
 
     # -- install / remove -----------------------------------------------------
 
@@ -76,38 +86,42 @@ class ModManager:
         mods_dir = Path(self.game.mods_dir)
         mods_dir.mkdir(parents=True, exist_ok=True)
 
-        base_slug = slugify(display_name)
-        staging_subdir = base_slug
-        n = 2
-        while (mods_dir / staging_subdir).exists() or staging_subdir in {
-            m.staging_subdir for m in self._mods.values()
-        }:
-            staging_subdir = f"{base_slug}-{n}"
-            n += 1
+        with self._lock:
+            base_slug = slugify(display_name)
+            staging_subdir = base_slug
+            n = 2
+            while (mods_dir / staging_subdir).exists() or staging_subdir in {
+                m.staging_subdir for m in self._mods.values()
+            }:
+                staging_subdir = f"{base_slug}-{n}"
+                n += 1
+            dest = mods_dir / staging_subdir
+            dest.mkdir(parents=True)  # reserve the slot so concurrent installs can't collide
 
-        dest = mods_dir / staging_subdir
-        archive.extract(archive_path, dest)
+        archive.extract(archive_path, dest)  # slow - deliberately outside the lock
 
         mod_id = staging_subdir
-        next_priority = max((m.priority for m in self._mods.values()), default=-1) + 1
-        mod = InstalledMod(
-            id=mod_id,
-            name=display_name,
-            game_id=self.game.id,
-            staging_subdir=staging_subdir,
-            enabled=True,
-            priority=next_priority,
-            source=source or ModSource(),
-        )
-        self._mods[mod.id] = mod
-        self._save()
+        with self._lock:
+            next_priority = max((m.priority for m in self._mods.values()), default=-1) + 1
+            mod = InstalledMod(
+                id=mod_id,
+                name=display_name,
+                game_id=self.game.id,
+                staging_subdir=staging_subdir,
+                enabled=True,
+                priority=next_priority,
+                source=source or ModSource(),
+            )
+            self._mods[mod.id] = mod
+            self._save()
         return mod
 
     def remove(self, mod_id: str, delete_files: bool = True) -> None:
-        mod = self._mods.pop(mod_id, None)
-        if mod is None:
-            raise ModManagerError(f"No such mod: {mod_id}")
-        self._save()
+        with self._lock:
+            mod = self._mods.pop(mod_id, None)
+            if mod is None:
+                raise ModManagerError(f"No such mod: {mod_id}")
+            self._save()
         if delete_files:
             staging_path = Path(self.game.mods_dir) / mod.staging_subdir
             shutil.rmtree(staging_path, ignore_errors=True)
@@ -115,15 +129,17 @@ class ModManager:
     # -- enable / ordering -----------------------------------------------------
 
     def set_enabled(self, mod_id: str, enabled: bool) -> None:
-        mod = self._require(mod_id)
-        mod.enabled = enabled
-        self._save()
+        with self._lock:
+            mod = self._require(mod_id)
+            mod.enabled = enabled
+            self._save()
 
     def reorder(self, ordered_mod_ids: list[str]) -> None:
         """Sets priority to match the given order (index 0 = lowest priority)."""
-        for priority, mod_id in enumerate(ordered_mod_ids):
-            self._require(mod_id).priority = priority
-        self._save()
+        with self._lock:
+            for priority, mod_id in enumerate(ordered_mod_ids):
+                self._require(mod_id).priority = priority
+            self._save()
 
     def _require(self, mod_id: str) -> InstalledMod:
         mod = self._mods.get(mod_id)
@@ -134,7 +150,8 @@ class ModManager:
     # -- deployment -----------------------------------------------------
 
     def _enabled_mods_sorted(self) -> list[InstalledMod]:
-        return sorted((m for m in self._mods.values() if m.enabled), key=lambda m: m.priority)
+        with self._lock:
+            return sorted((m for m in self._mods.values() if m.enabled), key=lambda m: m.priority)
 
     def deploy(self) -> deploy.DeployResult:
         plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())

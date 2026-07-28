@@ -199,3 +199,57 @@ def test_import_plugins_from_txt_resyncs_state(tmp_path, game):
     # Persisted too.
     manager2 = ModManager(game)
     assert [p.name for p in manager2.list_plugins()] == ["FromLoot.esm", "Inactive.esp"]
+
+
+def test_concurrent_installs_do_not_corrupt_state(tmp_path, game):
+    """Regression guard for backgrounding installs off the GUI thread:
+    many archives installing in parallel, with GUI-thread-style
+    remove/enable/reorder calls interleaved on the same ModManager, must
+    never crash, lose an install, or corrupt mods.json."""
+    import threading
+
+    manager = ModManager(game)
+    archive_paths = []
+    for i in range(20):
+        path = tmp_path / f"mod{i}.zip"
+        _make_zip(path, {f"mod{i}.esp": "x"})
+        archive_paths.append(path)
+
+    installed_ids: list[str] = []
+    errors: list[Exception] = []
+    lock = threading.Lock()
+
+    def install_worker(path, index):
+        try:
+            mod = manager.install_from_archive(path, f"Mod {index}")
+            with lock:
+                installed_ids.append(mod.id)
+        except Exception as exc:  # noqa: BLE001 - test wants to see any failure
+            with lock:
+                errors.append(exc)
+
+    def churn_worker():
+        # Simulates the GUI thread poking the same ModManager while
+        # installs are draining in the background.
+        for _ in range(50):
+            for mod in manager.list_mods():
+                manager.set_enabled(mod.id, True)
+
+    install_threads = [
+        threading.Thread(target=install_worker, args=(p, i)) for i, p in enumerate(archive_paths)
+    ]
+    churn_threads = [threading.Thread(target=churn_worker) for _ in range(3)]
+
+    for t in install_threads + churn_threads:
+        t.start()
+    for t in install_threads + churn_threads:
+        t.join(timeout=30)
+
+    assert not errors, f"unexpected errors during concurrent installs: {errors}"
+    assert len(installed_ids) == 20
+    assert len(set(installed_ids)) == 20, "duplicate/colliding mod ids - a race clobbered a slot"
+
+    # Reload from disk into a fresh manager - proves mods.json itself
+    # ended up consistent, not just the in-memory dict.
+    reloaded = ModManager(game)
+    assert {m.id for m in reloaded.list_mods()} == set(installed_ids)

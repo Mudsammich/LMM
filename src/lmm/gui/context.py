@@ -4,6 +4,8 @@ Kept separate from the tabs themselves so the persistence/business logic
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from PySide6.QtCore import QObject, Signal
 
 from .. import config as config_module
@@ -22,6 +24,13 @@ class AppContext(QObject):
         super().__init__()
         self.config = config_module.load()
         self.download_manager = DownloadManager(max_workers=3)
+        # Single worker: archive extraction is slow and must never run on
+        # the GUI thread (a queue of 200 downloads finishing in bursts would
+        # otherwise freeze the app), but installs also mutate a per-game
+        # ModManager's shared state, so they're serialized here rather than
+        # pooled - ModManager itself is still locked (see ModManager._lock)
+        # in case the GUI thread touches the same game concurrently.
+        self.install_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lmm-install")
         self._mod_managers: dict[str, ModManager] = {}
 
     # -- config / games -----------------------------------------------------
