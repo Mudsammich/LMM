@@ -200,19 +200,27 @@ class ModManager:
             raise ModManagerError(f"Unknown plugin(s) in reorder list: {missing}")
         plugins_module.save_plugins(self.state_dir, [current[n] for n in ordered_names])
 
-    def write_plugins_txt(self) -> Path:
+    def _require_plugins_txt_path(self) -> Path:
         if not self.game.plugins_txt_path:
             raise ModManagerError("No Plugins.txt path set for this game (Edit Game).")
-        current = plugins_module.load_plugins(self.state_dir)
         path = Path(self.game.plugins_txt_path)
+        if path.is_dir():
+            raise ModManagerError(
+                f"Plugins.txt path is a folder ({path}), not a file - it needs the "
+                f"filename too, e.g. {path / 'Plugins.txt'}"
+            )
+        return path
+
+    def write_plugins_txt(self) -> Path:
+        path = self._require_plugins_txt_path()
+        current = plugins_module.load_plugins(self.state_dir)
         plugins_module.write_plugins_txt(path, current)
         return path
 
     def import_plugins_from_txt(self) -> list[plugins_module.Plugin]:
         """Re-syncs LMM's plugin state from Plugins.txt - e.g. after
         running LOOT, which sorts and rewrites that file directly."""
-        if not self.game.plugins_txt_path:
-            raise ModManagerError("No Plugins.txt path set for this game (Edit Game).")
-        imported = plugins_module.import_from_plugins_txt(self.game.plugins_txt_path)
+        path = self._require_plugins_txt_path()
+        imported = plugins_module.import_from_plugins_txt(path)
         plugins_module.save_plugins(self.state_dir, imported)
         return imported

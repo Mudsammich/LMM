@@ -186,6 +186,30 @@ def test_write_plugins_txt_writes_to_configured_path(tmp_path, game):
     assert written_path.read_text(encoding="utf-8") == "*mod.esp\n"
 
 
+def test_write_plugins_txt_rejects_directory_path_with_clear_message(tmp_path, game):
+    """Regression test: pointing plugins_txt_path at the containing folder
+    (e.g. mixing it up with LOOT's separate "game local path" setting,
+    which does want the folder) used to raise a raw IsADirectoryError with
+    no indication of what was wrong."""
+    folder = tmp_path / "AppData" / "Local" / "Fallout4"
+    folder.mkdir(parents=True)
+    game.plugins_txt_path = str(folder)
+    manager = ModManager(game)
+
+    with pytest.raises(ModManagerError, match="is a folder"):
+        manager.write_plugins_txt()
+
+
+def test_import_plugins_from_txt_rejects_directory_path(tmp_path, game):
+    folder = tmp_path / "AppData" / "Local" / "Fallout4"
+    folder.mkdir(parents=True)
+    game.plugins_txt_path = str(folder)
+    manager = ModManager(game)
+
+    with pytest.raises(ModManagerError, match="is a folder"):
+        manager.import_plugins_from_txt()
+
+
 def test_import_plugins_from_txt_resyncs_state(tmp_path, game):
     game.plugins_txt_path = str(tmp_path / "Plugins.txt")
     Path(game.plugins_txt_path).write_text("*FromLoot.esm\nInactive.esp\n", encoding="utf-8")
