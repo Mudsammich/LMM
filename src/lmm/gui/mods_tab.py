@@ -367,24 +367,26 @@ class ModsTab(QWidget):
     def _write_plugins_txt(self) -> None:
         game_id = self._current_game_id()
         if not game_id:
+            QMessageBox.information(self, "Write Plugins.txt", "Select a game first.")
             return
         manager = self.ctx.mod_manager(game_id)
         try:
             path = manager.write_plugins_txt()
-        except ModManagerError as exc:
-            QMessageBox.critical(self, "Write Plugins.txt", str(exc))
+        except (ModManagerError, OSError) as exc:
+            QMessageBox.critical(self, "Write Plugins.txt", f"{type(exc).__name__}: {exc}")
             return
         self.plugins_status_label.setText(f"Wrote {path}")
 
     def _import_plugins_txt(self) -> None:
         game_id = self._current_game_id()
         if not game_id:
+            QMessageBox.information(self, "Import from Plugins.txt", "Select a game first.")
             return
         manager = self.ctx.mod_manager(game_id)
         try:
             plugins = manager.import_plugins_from_txt()
-        except ModManagerError as exc:
-            QMessageBox.critical(self, "Import from Plugins.txt", str(exc))
+        except (ModManagerError, OSError) as exc:
+            QMessageBox.critical(self, "Import from Plugins.txt", f"{type(exc).__name__}: {exc}")
             return
         self._refresh_plugins()
         self.plugins_status_label.setText(f"Imported {len(plugins)} plugin(s) from Plugins.txt.")
