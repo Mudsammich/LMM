@@ -195,6 +195,36 @@ class DownloadsTab(QWidget):
         )
         return None
 
+    def queue_direct_url(
+        self,
+        url: str,
+        display_name: str,
+        game_id: str | None = None,
+        priority_hint: int | None = None,
+        filename: str = "",
+    ) -> str | None:
+        """Queues a plain https download that has nothing to do with Nexus -
+        used for a collection's off-site files, which for Bethesda games are
+        usually GitHub releases (script extender plugins, preloaders). No API
+        key or account tier is involved; it's an ordinary file fetch.
+
+        Returns an error message on failure, matching queue_nexus_file so a
+        caller looping over a collection can aggregate failures.
+        """
+        if not url.lower().startswith(("http://", "https://")):
+            return f"unsupported off-site URL: {url}"
+        self._queue_download(
+            str(uuid.uuid4()),
+            display_name,
+            url,
+            paths.download_cache_dir(),
+            source=ModSource(kind="direct"),
+            game_id=game_id,
+            priority_hint=priority_hint,
+            filename=filename,
+        )
+        return None
+
     # -- queueing / progress -----------------------------------------------------
 
     def _queue_download(
@@ -206,8 +236,12 @@ class DownloadsTab(QWidget):
         source: ModSource | None = None,
         game_id: str | None = None,
         priority_hint: int | None = None,
+        filename: str = "",
     ) -> None:
-        dest_path = dest_dir / (Path(url.split("?")[0]).name or f"{task_id}.download")
+        # An explicit filename matters for release URLs, whose last path
+        # segment can be a version tag rather than the file itself - and the
+        # saved name decides the archive type we can extract.
+        dest_path = dest_dir / (filename or Path(url.split("?")[0]).name or f"{task_id}.download")
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(display_name))

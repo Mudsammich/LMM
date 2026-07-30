@@ -196,6 +196,14 @@ If the GraphQL fetch ever breaks (it's an undocumented, best-effort query),
 running Vortex/the Nexus Mods App once to fetch the collection and copying
 `collection.json` out of its profile directory.
 
+**Off-site files** in a collection (GitHub releases and the like - a lot of
+Bethesda tooling such as script-extender plugins and preloaders lives there
+rather than on Nexus) are queued automatically alongside the Nexus ones.
+Those are ordinary file downloads with no API key or account tier involved,
+which is the same thing Vortex does with them. Where a collection links a
+*page* instead of a file, that can't be automated - LMM names those files
+and shows their URLs at the end so you know exactly what to fetch by hand.
+
 Mods queued this way are installed in the **collection's authored order**
 (appended after whatever's already installed), regardless of which
 download happens to finish first - downloads run several at a time, so

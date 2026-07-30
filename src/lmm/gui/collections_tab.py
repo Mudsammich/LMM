@@ -173,8 +173,12 @@ class CollectionsTab(QWidget):
             )
             return
 
-        to_queue = [m for m in self._manifest.mods if not m.optional and m.is_nexus]
-        skipped = sum(1 for m in self._manifest.mods if not m.optional and not m.is_nexus)
+        required = [m for m in self._manifest.mods if not m.optional]
+        # Off-site files (typically GitHub releases - script extenders and
+        # preloaders live there, not on Nexus) download as plain URLs, so
+        # they queue alongside the Nexus files rather than being skipped.
+        to_queue = [m for m in required if m.is_nexus or m.is_direct]
+        browse_only = [m for m in required if not (m.is_nexus or m.is_direct)]
 
         if len(to_queue) > 25:
             reply = QMessageBox.question(
@@ -201,14 +205,23 @@ class CollectionsTab(QWidget):
             self.summary_label.setText(f"Queueing {i}/{len(to_queue)}: {mod.name}…")
             QApplication.processEvents()
             try:
-                error = self.downloads_tab.queue_nexus_file(
-                    mod.domain_name or self._manifest.domain_name,
-                    mod.mod_id,
-                    mod.file_id,
-                    mod.name,
-                    game_id=game_id,
-                    priority_hint=base_priority + i - 1,
-                )
+                if mod.is_direct:
+                    error = self.downloads_tab.queue_direct_url(
+                        mod.direct_url,
+                        mod.name,
+                        game_id=game_id,
+                        priority_hint=base_priority + i - 1,
+                        filename=mod.suggested_filename,
+                    )
+                else:
+                    error = self.downloads_tab.queue_nexus_file(
+                        mod.domain_name or self._manifest.domain_name,
+                        mod.mod_id,
+                        mod.file_id,
+                        mod.name,
+                        game_id=game_id,
+                        priority_hint=base_priority + i - 1,
+                    )
             except NexusRateLimitError:
                 rate_limited = True
                 break
@@ -221,9 +234,22 @@ class CollectionsTab(QWidget):
             f"{self._manifest.name} by {self._manifest.author or 'unknown'} - {len(self._manifest.mods)} mods"
         )
 
+        direct_count = sum(1 for m in to_queue if m.is_direct)
         message = f"Queued {queued} of {len(to_queue)} download(s)."
-        if skipped:
-            message += f" Skipped {skipped} non-Nexus source(s) - download those manually."
+        if direct_count:
+            message += f" {direct_count} of those are off-site files (e.g. GitHub releases)."
+        if browse_only:
+            # These can't be automated - the author pointed at a page rather
+            # than a file - so name them instead of just counting them.
+            names = "\n".join(
+                f"  - {m.name}" + (f"  ({m.direct_url})" if m.direct_url else "")
+                for m in browse_only[:10]
+            )
+            more = f"\n  … and {len(browse_only) - 10} more" if len(browse_only) > 10 else ""
+            message += (
+                f"\n\n{len(browse_only)} file(s) have to be downloaded by hand - the "
+                f"collection links a page rather than a file:\n{names}{more}"
+            )
         if rate_limited:
             message += (
                 f"\n\nStopped early: hit Nexus's API rate limit after {queued} mod(s). "
