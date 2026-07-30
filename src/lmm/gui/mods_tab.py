@@ -54,6 +54,7 @@ class ModsTab(QWidget):
         deploy_btn.setProperty("role", "primary")
         undeploy_btn = QPushButton("Undeploy")
         conflicts_btn = QPushButton("Show Conflicts")
+        suggest_order_btn = QPushButton("Suggest Order (beta)")
 
         install_btn.clicked.connect(self._install_from_archive)
         select_all_btn.clicked.connect(self.table.selectAll)
@@ -64,11 +65,12 @@ class ModsTab(QWidget):
         deploy_btn.clicked.connect(self._deploy)
         undeploy_btn.clicked.connect(self._undeploy)
         conflicts_btn.clicked.connect(self._show_conflicts)
+        suggest_order_btn.clicked.connect(self._suggest_order)
 
         button_row = QHBoxLayout()
         for b in (
             install_btn, select_all_btn, remove_btn, remove_all_btn,
-            up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn,
+            up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn, suggest_order_btn,
         ):
             button_row.addWidget(b)
         button_row.addStretch(1)
@@ -288,6 +290,40 @@ class ModsTab(QWidget):
         for path, mod_ids in sorted(conflicts.items()):
             lines.append(f"{path}\n    provided by: {', '.join(mod_ids)} (winner: {mod_ids[-1]})")
         QMessageBox.information(self, "Conflicts", "\n\n".join(lines))
+
+    def _suggest_order(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        suggestion = manager.suggest_reorder()
+        if not suggestion.changed:
+            QMessageBox.information(
+                self,
+                "Suggest Order",
+                "No conflicts found where a naming or file-count signal suggests a "
+                "different winner than the current order already has. This isn't a "
+                "guarantee there are no conflicts left - see Show Conflicts.",
+            )
+            return
+
+        lines = [f"- {h.reason}" for h in suggestion.hints]
+        shown = "\n".join(lines[:20])
+        more = f"\n… and {len(lines) - 20} more" if len(lines) > 20 else ""
+        reply = QMessageBox.question(
+            self,
+            "Suggest Order",
+            f"Found {len(lines)} conflict(s) where a patch/fix name or a file-count "
+            "difference suggests a specific winner. This is a heuristic based on "
+            "modding conventions, not a guarantee every conflict is resolved "
+            "correctly - review Show Conflicts after applying.\n\n"
+            f"{shown}{more}\n\nApply this reorder?",
+        )
+        if reply != QMessageBox.Yes:
+            return
+        manager.reorder(suggestion.new_order)
+        self.ctx.notify_mods_changed(game_id)
+        self.status_label.setText(f"Reordered based on {len(lines)} conflict-resolution hint(s).")
 
     # -- plugin load order (Bethesda-style games) -----------------------------------------------------
 

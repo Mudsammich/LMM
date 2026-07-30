@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .. import paths
 from ..models import DeployMethod, Game, InstalledMod, ModSource
-from . import archive, deploy, plugins as plugins_module
+from . import archive, deploy, plugins as plugins_module, sorter
 
 
 def slugify(text: str) -> str:
@@ -184,6 +184,19 @@ class ModManager:
     def preview_conflicts(self) -> dict[str, list[str]]:
         plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
         return plan.conflicts
+
+    def suggest_reorder(self) -> sorter.SortSuggestion:
+        """Heuristic reorder suggestion for resolving file conflicts - see
+        ``mods/sorter.py`` for exactly what it does and doesn't claim to
+        do. Doesn't mutate anything; pass ``suggestion.new_order`` to
+        ``reorder()`` to actually apply it."""
+        with self._lock:
+            all_mods = sorted(self._mods.values(), key=lambda m: m.priority)
+        mods_dir = Path(self.game.mods_dir)
+        enabled = [m for m in all_mods if m.enabled]
+        plan = deploy.build_plan(mods_dir, enabled)
+        file_counts = {m.id: len(deploy.scan_mod_files(mods_dir / m.staging_subdir)) for m in enabled}
+        return sorter.suggest_order(all_mods, plan.conflicts, file_counts)
 
     # -- plugin load order (Bethesda-style games) -----------------------------------------------------
 

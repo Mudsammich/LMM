@@ -111,6 +111,19 @@ deletes everything selected in one confirmation instead of one at a time,
 and **Remove All…** clears a game's entire mod list in one step (handy for
 starting over after a big collection install).
 
+**Suggest Order (beta)** proposes a reorder to resolve file conflicts,
+using two real modding conventions rather than a guess: a mod whose name
+suggests it's a patch/fix/compatibility mod is moved after whatever it
+conflicts with (that's the entire point of such a mod), and failing that,
+the mod that deploys fewer files is treated as the more specific one and
+moved after the mod it conflicts with (a texture swap after the overhaul
+it's swapping textures for). Conflicting pairs with no such signal are
+left exactly where they were - this is a heuristic that gives you a
+better default winner than "whichever mod happened to install first," not
+a guarantee every conflict is resolved correctly. It shows you exactly
+what it's about to change before applying anything, and **Show
+Conflicts** remains the source of truth for whatever's left afterwards.
+
 ### 4. Nexus Collections
 
 Collections tab - paste a collection's URL (e.g.

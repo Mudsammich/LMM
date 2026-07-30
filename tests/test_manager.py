@@ -313,6 +313,27 @@ def test_out_of_order_installs_preserve_intended_priority(tmp_path, game):
     assert [m.id for m in manager.list_mods()] == [mod_a.id, mod_b.id]
 
 
+def test_suggest_reorder_moves_patch_after_the_mod_it_patches(tmp_path, game):
+    big_archive = tmp_path / "big.zip"
+    _make_zip(big_archive, {f"file{i}.esp": "x" for i in range(20)})
+    patch_archive = tmp_path / "patch.zip"
+    _make_zip(patch_archive, {"file0.esp": "y"})  # conflicts on file0.esp
+
+    manager = ModManager(game)
+    patch_mod = manager.install_from_archive(patch_archive, "Big Mod Fix Patch")  # installed first
+    big_mod = manager.install_from_archive(big_archive, "Big Mod")
+
+    assert patch_mod.priority < big_mod.priority  # currently loses to Big Mod
+
+    suggestion = manager.suggest_reorder()
+    assert suggestion.changed
+    assert suggestion.new_order.index(patch_mod.id) > suggestion.new_order.index(big_mod.id)
+
+    manager.reorder(suggestion.new_order)
+    reloaded = {m.id: m for m in manager.list_mods()}
+    assert reloaded[patch_mod.id].priority > reloaded[big_mod.id].priority
+
+
 def test_concurrent_installs_do_not_corrupt_state(tmp_path, game):
     """Regression guard for backgrounding installs off the GUI thread:
     many archives installing in parallel, with GUI-thread-style
