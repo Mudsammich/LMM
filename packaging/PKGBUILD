@@ -40,6 +40,7 @@ optdepends=(
 	'bubblewrap: network-isolated game launches (Games > Launch Game)'
 )
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+install=lmm.install
 source=()
 sha256sums=()
 

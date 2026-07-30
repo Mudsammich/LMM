@@ -300,6 +300,8 @@ class ModsTab(QWidget):
         header.setProperty("role", "section")
 
         sync_btn = QPushButton("Sync from Mods")
+        select_all_btn = QPushButton("Select All")
+        remove_btn = QPushButton("Remove Selected")
         up_btn = QPushButton("Move Up")
         down_btn = QPushButton("Move Down")
         write_btn = QPushButton("Write Plugins.txt")
@@ -307,20 +309,22 @@ class ModsTab(QWidget):
         import_btn = QPushButton("Import from Plugins.txt")
 
         sync_btn.clicked.connect(self._sync_plugins)
+        select_all_btn.clicked.connect(lambda: self.plugins_table.selectAll())
+        remove_btn.clicked.connect(self._remove_selected_plugins)
         up_btn.clicked.connect(lambda: self._move_plugin(-1))
         down_btn.clicked.connect(lambda: self._move_plugin(1))
         write_btn.clicked.connect(self._write_plugins_txt)
         import_btn.clicked.connect(self._import_plugins_txt)
 
         plugin_button_row = QHBoxLayout()
-        for b in (sync_btn, up_btn, down_btn, write_btn, import_btn):
+        for b in (sync_btn, select_all_btn, remove_btn, up_btn, down_btn, write_btn, import_btn):
             plugin_button_row.addWidget(b)
         plugin_button_row.addStretch(1)
 
         self.plugins_table = QTableWidget(0, len(PLUGIN_COLUMNS))
         self.plugins_table.setHorizontalHeaderLabels(PLUGIN_COLUMNS)
         self.plugins_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.plugins_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.plugins_table.setSelectionMode(QAbstractItemView.ExtendedSelection)  # ctrl/shift-click multi-select
         plugins_header = self.plugins_table.horizontalHeader()
         plugins_header.setSectionResizeMode(QHeaderView.ResizeToContents)
         plugins_header.setStretchLastSection(False)
@@ -372,6 +376,30 @@ class ModsTab(QWidget):
         if not rows:
             return None
         return self.plugins_table.item(rows[0].row(), 0).data(1000)
+
+    def _selected_plugin_names(self) -> list[str]:
+        rows = self.plugins_table.selectionModel().selectedRows()
+        return [self.plugins_table.item(r.row(), 0).data(1000) for r in rows]
+
+    def _remove_selected_plugins(self) -> None:
+        game_id = self._current_game_id()
+        names = self._selected_plugin_names()
+        if not game_id or not names:
+            QMessageBox.information(
+                self, "Remove plugins", "Select one or more plugins first (ctrl/shift-click for multiple)."
+            )
+            return
+        manager = self.ctx.mod_manager(game_id)
+        try:
+            manager.remove_plugins(names)
+        except ModManagerError as exc:
+            QMessageBox.critical(self, "Remove plugins", str(exc))
+            return
+        self._refresh_plugins()
+        self.plugins_status_label.setText(
+            f"Removed {len(names)} plugin(s) from the tracked list. Note: they'll "
+            "reappear on the next Sync from Mods if their mod is still enabled."
+        )
 
     def _sync_plugins(self) -> None:
         game_id = self._current_game_id()

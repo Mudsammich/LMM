@@ -196,6 +196,32 @@ def test_set_plugin_enabled_unknown_plugin_raises(game):
         manager.set_plugin_enabled("nope.esp", True)
 
 
+def test_remove_plugins_multiple_at_once(tmp_path, game):
+    archive_path = tmp_path / "mod.zip"
+    _make_zip(archive_path, {"a.esp": "x", "b.esp": "x", "c.esp": "x"})
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "Three Plugins")
+    manager.sync_plugins_from_mods()
+
+    manager.remove_plugins(["a.esp", "c.esp"])
+
+    assert [p.name for p in manager.list_plugins()] == ["b.esp"]
+
+
+def test_remove_plugins_unknown_name_raises_and_removes_nothing(tmp_path, game):
+    archive_path = tmp_path / "mod.zip"
+    _make_zip(archive_path, {"a.esp": "x"})
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "One Plugin")
+    manager.sync_plugins_from_mods()
+
+    with pytest.raises(ModManagerError, match="No such plugin"):
+        manager.remove_plugins(["a.esp", "nope.esp"])
+
+    # all-or-nothing - a.esp must survive the failed batch
+    assert [p.name for p in manager.list_plugins()] == ["a.esp"]
+
+
 def test_write_plugins_txt_requires_configured_path(game):
     manager = ModManager(game)
     with pytest.raises(ModManagerError, match="No Plugins.txt path"):

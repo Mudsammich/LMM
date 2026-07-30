@@ -203,6 +203,21 @@ class ModManager:
             raise ModManagerError(f"No such plugin: {name}")
         plugins_module.save_plugins(self.state_dir, current)
 
+    def remove_plugins(self, names: list[str]) -> None:
+        """Drops plugins from LMM's tracked list. Note this doesn't stop
+        them reappearing on the next Sync from Mods if the mod providing
+        them is still enabled - it's for cleaning up stale entries (e.g.
+        left over from a mod removed a while ago), not for permanently
+        excluding a plugin a still-enabled mod ships."""
+        current = plugins_module.load_plugins(self.state_dir)
+        known_names = {p.name for p in current}
+        missing = [n for n in names if n not in known_names]
+        if missing:
+            raise ModManagerError(f"No such plugin(s): {missing}")
+        to_remove = set(names)
+        remaining = [p for p in current if p.name not in to_remove]
+        plugins_module.save_plugins(self.state_dir, remaining)
+
     def reorder_plugins(self, ordered_names: list[str]) -> None:
         current = {p.name: p for p in plugins_module.load_plugins(self.state_dir)}
         missing = [n for n in ordered_names if n not in current]
