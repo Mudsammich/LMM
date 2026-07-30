@@ -117,3 +117,24 @@ def test_payload_entries_win_over_outer_duplicates(tmp_path):
     archive.flatten_payload_root(staging)
 
     assert (staging / "readme.txt").read_text() == "inner readme"
+
+
+def test_flatten_keeps_data_beside_a_script_extender_loader(tmp_path):
+    """F4SE/SKSE ship a loader .exe at the archive root next to their own
+    Data folder. That Data folder is real - stripping it would scatter the
+    mod's scripts into the game root instead of into Data."""
+    staging = tmp_path / "staging"
+    _tree(staging, ["f4se_loader.exe", "Data/Scripts/thing.pex"])
+
+    assert archive.flatten_payload_root(staging) is None
+    assert (staging / "f4se_loader.exe").is_file()
+    assert (staging / "Data" / "Scripts" / "thing.pex").is_file()
+
+
+def test_flatten_keeps_data_beside_a_dll_loader(tmp_path):
+    staging = tmp_path / "staging"
+    _tree(staging, ["WinHTTP.dll", "Data/F4SE/Plugins/buffout.dll"])
+
+    assert archive.flatten_payload_root(staging) is None
+    assert (staging / "WinHTTP.dll").is_file()
+    assert (staging / "Data" / "F4SE" / "Plugins" / "buffout.dll").is_file()

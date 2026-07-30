@@ -13,7 +13,15 @@ from pathlib import Path
 from typing import Callable
 
 from .. import paths
-from ..models import DeployMethod, Game, InstalledMod, ModSource
+from ..models import (
+    DEPLOY_ROOT_AUTO,
+    DEPLOY_ROOT_DATA,
+    DEPLOY_ROOT_GAME,
+    DeployMethod,
+    Game,
+    InstalledMod,
+    ModSource,
+)
 from . import archive, deploy, fomod as fomod_module, fomod_install, plugins as plugins_module, sorter
 
 # Called with the parsed installer script; returns the user's choices, or
@@ -246,25 +254,54 @@ class ModManager:
         with self._lock:
             return sorted((m for m in self._mods.values() if m.enabled), key=lambda m: m.priority)
 
+    def _game_root(self) -> Path:
+        return Path(self.game.install_path)
+
     def _build_plan(self) -> deploy.DeployPlan:
         """The deploy plan for the currently enabled mods. Always built
-        against the real target directory so case-merging matches the
-        game's own folder capitalisation - a preview that canonicalised
-        differently from the real deploy would be misleading."""
+        against the real game directory so case-merging matches the game's
+        own folder capitalisation - a preview that canonicalised differently
+        from the real deploy would be misleading."""
         return deploy.build_plan(
             Path(self.game.mods_dir),
             self._enabled_mods_sorted(),
-            target_dir=Path(self.game.deploy_target()),
+            deploy_subpath=self.game.deploy_subpath,
+            target_dir=self._game_root(),
         )
 
     def deploy(self) -> deploy.DeployResult:
         plan = self._build_plan()
-        target_dir = Path(self.game.deploy_target())
-        return deploy.apply_plan(plan, target_dir, self.state_dir, self.game.deploy_method)
+        return deploy.apply_plan(
+            plan,
+            self._game_root(),
+            self.state_dir,
+            self.game.deploy_method,
+            legacy_base=Path(self.game.deploy_target()),
+        )
 
     def undeploy(self) -> int:
-        target_dir = Path(self.game.deploy_target())
-        return deploy.undeploy_all(target_dir, self.state_dir)
+        return deploy.undeploy_all(
+            self._game_root(), self.state_dir, legacy_base=Path(self.game.deploy_target())
+        )
+
+    def deploy_roots(self) -> dict[str, str]:
+        """mod id -> where each enabled mod's files will actually go, for
+        the UI to surface. Resolves "auto" to what detection decided."""
+        mods_dir = Path(self.game.mods_dir)
+        with self._lock:
+            mods = list(self._mods.values())
+        return {m.id: deploy.resolve_deploy_root(m, mods_dir / m.staging_subdir) for m in mods}
+
+    def set_deploy_root(self, mod_id: str, deploy_root: str) -> None:
+        """Overrides where a mod deploys. Detection covers the mods that
+        follow the usual packaging conventions, but an override matters for
+        the ones that don't - guessing wrong on a script extender means the
+        game silently loads none of it."""
+        if deploy_root not in (DEPLOY_ROOT_AUTO, DEPLOY_ROOT_DATA, DEPLOY_ROOT_GAME):
+            raise ModManagerError(f"Unknown deploy root: {deploy_root!r}")
+        with self._lock:
+            self._require(mod_id).deploy_root = deploy_root
+            self._save()
 
     def preview_conflicts(self) -> dict[str, list[str]]:
         return self._build_plan().conflicts
@@ -278,7 +315,12 @@ class ModManager:
             all_mods = sorted(self._mods.values(), key=lambda m: m.priority)
         mods_dir = Path(self.game.mods_dir)
         enabled = [m for m in all_mods if m.enabled]
-        plan = deploy.build_plan(mods_dir, enabled, target_dir=Path(self.game.deploy_target()))
+        plan = deploy.build_plan(
+            mods_dir,
+            enabled,
+            deploy_subpath=self.game.deploy_subpath,
+            target_dir=self._game_root(),
+        )
         file_counts = {m.id: len(deploy.scan_mod_files(mods_dir / m.staging_subdir)) for m in enabled}
         return sorter.suggest_order(all_mods, plan.conflicts, file_counts)
 
@@ -293,7 +335,7 @@ class ModManager:
         into the persisted plugin order, keeping existing order/enabled
         state and dropping plugins no longer provided by anything."""
         plan = self._build_plan()
-        detected = plugins_module.detect_plugins(plan.links)
+        detected = plugins_module.detect_plugins(plan.links, data_prefix=self.game.deploy_subpath)
         current = plugins_module.load_plugins(self.state_dir)
         updated = plugins_module.sync_plugins(current, detected)
         plugins_module.save_plugins(self.state_dir, updated)

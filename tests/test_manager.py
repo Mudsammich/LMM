@@ -314,6 +314,63 @@ def test_out_of_order_installs_preserve_intended_priority(tmp_path, game):
     assert [m.id for m in manager.list_mods()] == [mod_a.id, mod_b.id]
 
 
+def test_root_mod_deploys_beside_the_executable(tmp_path, game):
+    """End to end: a Buffout-style archive must put its loader at the game
+    root and its plugin in the real Data folder, not Data/Data."""
+    archive_path = tmp_path / "buffout.zip"
+    _make_zip(
+        archive_path,
+        {"WinHTTP.dll": "loader", "Data/F4SE/Plugins/buffout.dll": "plugin"},
+    )
+
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "Buffout 4")
+    manager.deploy()
+
+    install = tmp_path / "install"
+    assert (install / "WinHTTP.dll").read_text() == "loader"
+    assert (install / "Data" / "F4SE" / "Plugins" / "buffout.dll").read_text() == "plugin"
+    assert not (install / "Data" / "Data").exists()
+    assert not (install / "Data" / "WinHTTP.dll").exists()
+
+
+def test_set_deploy_root_overrides_detection(tmp_path, game):
+    archive_path = tmp_path / "odd.zip"
+    _make_zip(archive_path, {"weird.dll": "x"})
+
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "Odd Mod")
+    assert manager.deploy_roots()[mod.id] == "game_root"
+
+    manager.set_deploy_root(mod.id, "data")
+    assert manager.deploy_roots()[mod.id] == "data"
+
+    # Survives a reload from disk.
+    assert ModManager(game).deploy_roots()[mod.id] == "data"
+
+    manager.deploy()
+    assert (tmp_path / "install" / "Data" / "weird.dll").read_text() == "x"
+
+
+def test_set_deploy_root_rejects_an_unknown_value(tmp_path, game):
+    archive_path = tmp_path / "m.zip"
+    _make_zip(archive_path, {"a.esp": "x"})
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "M")
+    with pytest.raises(ModManagerError):
+        manager.set_deploy_root(mod.id, "somewhere-else")
+
+
+def test_plugins_are_still_detected_with_root_relative_paths(tmp_path, game):
+    archive_path = tmp_path / "m.zip"
+    _make_zip(archive_path, {"Thing.esp": "x", "Textures/t.dds": "y"})
+
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "Plugin Mod")
+
+    assert [p.name for p in manager.sync_plugins_from_mods()] == ["Thing.esp"]
+
+
 def test_install_flattens_a_data_wrapped_archive(tmp_path, game):
     """A mod packaged as Data/... must land as Textures/... in staging, or
     every file deploys one level too deep for the game to find."""

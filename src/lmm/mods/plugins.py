@@ -40,18 +40,28 @@ class Plugin:
         return cls(name=d["name"], enabled=d.get("enabled", True))
 
 
-def detect_plugins(deploy_links: dict[str, Path]) -> list[str]:
+def detect_plugins(deploy_links: dict[str, Path], data_prefix: str = "") -> list[str]:
     """Plugin filenames among a deploy plan's winning files.
 
-    ``deploy_links`` is a deploy.DeployPlan.links dict (relative posix
-    path -> source file). Bethesda plugins must sit directly in the Data
-    folder root, not a subfolder, so nested paths are ignored.
+    ``deploy_links`` is a deploy.DeployPlan.links dict, whose keys are
+    relative to the *game root*. ``data_prefix`` is the game's data
+    subfolder (e.g. ``Data``); paths outside it are skipped, since a plugin
+    only counts if it lands directly in the data folder - not in one of its
+    subfolders, and not in the game root.
     """
-    names = [
-        rel
-        for rel in deploy_links
-        if "/" not in rel and Path(rel).suffix.lower() in PLUGIN_EXTENSIONS
-    ]
+    prefix = data_prefix.strip("/").lower()
+    names: list[str] = []
+    for rel in deploy_links:
+        candidate = rel
+        if prefix:
+            head, _, tail = rel.partition("/")
+            if head.lower() != prefix or not tail:
+                continue
+            candidate = tail
+        if "/" in candidate:
+            continue
+        if Path(candidate).suffix.lower() in PLUGIN_EXTENSIONS:
+            names.append(candidate)
     return sorted(names, key=str.lower)
 
 

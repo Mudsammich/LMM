@@ -23,13 +23,27 @@ from PySide6.QtWidgets import (
 
 from .context import AppContext
 from .fomod_dialog import FomodDialog
+from ..models import (
+    DEPLOY_ROOT_AUTO,
+    DEPLOY_ROOT_DATA,
+    DEPLOY_ROOT_GAME,
+    InstalledMod,
+)
 from ..mods.archive import SUPPORTED_EXTENSIONS
 from ..mods.fomod import FomodConfig
 from ..mods.fomod_install import InstallState
 from ..mods.manager import InstallCancelled, ModManagerError
 
-COLUMNS = ["On", "Priority", "Name", "Source"]
+COLUMNS = ["On", "Priority", "Name", "Deploys to", "Source"]
 PLUGIN_COLUMNS = ["On", "Plugin"]
+
+
+def _deploy_root_label(mod: InstalledMod, resolved: str) -> str:
+    """Shows where a mod's files land, and whether that was detected or set
+    by hand - "forced" matters because it's the thing to re-check if a mod
+    isn't loading."""
+    label = "Game root" if resolved == DEPLOY_ROOT_GAME else "Data"
+    return label if mod.deploy_root == DEPLOY_ROOT_AUTO else f"{label} (forced)"
 
 
 class ModsTab(QWidget):
@@ -59,6 +73,7 @@ class ModsTab(QWidget):
         undeploy_btn = QPushButton("Undeploy")
         conflicts_btn = QPushButton("Show Conflicts")
         suggest_order_btn = QPushButton("Suggest Order (beta)")
+        deploy_root_btn = QPushButton("Deploy Target…")
 
         install_btn.clicked.connect(self._install_from_archive)
         select_all_btn.clicked.connect(self.table.selectAll)
@@ -70,11 +85,13 @@ class ModsTab(QWidget):
         undeploy_btn.clicked.connect(self._undeploy)
         conflicts_btn.clicked.connect(self._show_conflicts)
         suggest_order_btn.clicked.connect(self._suggest_order)
+        deploy_root_btn.clicked.connect(self._set_deploy_root)
 
         button_row = QHBoxLayout()
         for b in (
             install_btn, select_all_btn, remove_btn, remove_all_btn,
-            up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn, suggest_order_btn,
+            up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn,
+            suggest_order_btn, deploy_root_btn,
         ):
             button_row.addWidget(b)
         button_row.addStretch(1)
@@ -131,6 +148,7 @@ class ModsTab(QWidget):
             return
         manager = self.ctx.mod_manager(game_id)
         mods = manager.list_mods()
+        roots = manager.deploy_roots()
         self.table.blockSignals(True)
         self.table.setRowCount(len(mods))
         for row, mod in enumerate(mods):
@@ -141,10 +159,11 @@ class ModsTab(QWidget):
             self.table.setItem(row, 0, enabled_item)
             self.table.setItem(row, 1, QTableWidgetItem(str(mod.priority)))
             self.table.setItem(row, 2, QTableWidgetItem(mod.name))
+            self.table.setItem(row, 3, QTableWidgetItem(_deploy_root_label(mod, roots.get(mod.id, ""))))
             source = mod.source.kind
             if mod.source.mod_id:
                 source = f"nexus #{mod.source.mod_id}"
-            self.table.setItem(row, 3, QTableWidgetItem(source))
+            self.table.setItem(row, 4, QTableWidgetItem(source))
         self.table.blockSignals(False)
         self._refresh_plugins()
 
@@ -341,6 +360,52 @@ class ModsTab(QWidget):
         manager.reorder(suggestion.new_order)
         self.ctx.notify_mods_changed(game_id)
         self.status_label.setText(f"Reordered based on {len(lines)} conflict-resolution hint(s).")
+
+    def _set_deploy_root(self) -> None:
+        game_id = self._current_game_id()
+        mod_ids = self._selected_mod_ids()
+        if not game_id or not mod_ids:
+            QMessageBox.information(
+                self,
+                "Deploy Target",
+                "Select one or more mods first (ctrl/shift-click for multiple).",
+            )
+            return
+
+        game = self.ctx.config.games[game_id]
+        data_name = game.deploy_subpath or "game folder"
+        choices = [
+            f"Detect automatically (recommended)",
+            f"{data_name} folder - normal mods (textures, meshes, plugins)",
+            "Game root - script extenders, crash loggers, ENB/ReShade",
+        ]
+        values = [DEPLOY_ROOT_AUTO, DEPLOY_ROOT_DATA, DEPLOY_ROOT_GAME]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Deploy Target",
+            f"Where should these {len(mod_ids)} mod(s) install to?\n\n"
+            "Most mods go in the data folder. Script extenders (F4SE/SKSE),\n"
+            "crash loggers (Buffout) and graphics injectors (ENB, ReShade)\n"
+            "only work from the game root, next to the game's .exe.",
+            choices,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        manager = self.ctx.mod_manager(game_id)
+        target = values[choices.index(choice)]
+        try:
+            for mod_id in mod_ids:
+                manager.set_deploy_root(mod_id, target)
+        except ModManagerError as exc:
+            QMessageBox.critical(self, "Deploy Target", str(exc))
+            return
+        self.ctx.notify_mods_changed(game_id)
+        self.status_label.setText(
+            f"Set deploy target for {len(mod_ids)} mod(s). Deploy again to apply it."
+        )
 
     # -- plugin load order (Bethesda-style games) -----------------------------------------------------
 

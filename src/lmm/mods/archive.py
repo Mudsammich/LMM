@@ -39,8 +39,15 @@ _GAME_CONTENT_DIRS = {
     # root the installer's paths are relative to, so never descend past it.
     "fomod",
 }
-# Likewise for loose files sitting at the payload root.
-_GAME_CONTENT_SUFFIXES = {".esp", ".esm", ".esl", ".ba2", ".bsa", ".dll", ".ini"}
+# Likewise for loose files sitting at the payload root. The executable and
+# library suffixes matter for a second reason: a script extender or
+# injector ships its loader at the archive root *next to* its own ``Data``
+# folder, and seeing one of those tells us that root is the game root - so
+# the ``Data`` folder beside it is real, not a redundant wrapper to strip.
+_GAME_CONTENT_SUFFIXES = {
+    ".esp", ".esm", ".esl", ".ba2", ".bsa",
+    ".dll", ".exe", ".asi", ".ini",
+}
 
 # Guard against pathologically nested archives (and against a symlink
 # loop turning the descent into an infinite one).

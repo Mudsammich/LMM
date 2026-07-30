@@ -20,8 +20,9 @@ together three things Linux modding usually leaves you to glue by hand:
 Mods are never extracted directly into your game folder. Each installed
 mod lives in its own subfolder under a per-game staging directory
 (`mods_dir`). "Deploy" walks your enabled mods in priority order and
-symlinks their files into the game's real directory (`install_path` +
-`deploy_subpath`, e.g. `.../Skyrim Special Edition/Data`); a later mod's
+symlinks their files into the game's real directory - normally
+`install_path` + `deploy_subpath` (e.g. `.../Skyrim Special Edition/Data`),
+though some mods deploy to the game root instead (see below); a later mod's
 file silently wins over an earlier one at the same path, and every such
 collision is reported as a conflict. "Undeploy" removes exactly the links
 LMM created - it verifies each link still points at the mod file it came
@@ -50,6 +51,31 @@ otherwise every Windows-packaged mod is subtly broken here:
   Deployed literally, every file sits one level too deep. LMM detects the
   real payload root on install and hoists it up, leaving genuinely
   ambiguous archives alone rather than guessing.
+
+### Mods that install next to the .exe, not in Data
+
+Most mods belong in the game's data folder, but some only work from the
+**game root**, beside the game's executable:
+
+| Mod | Goes in |
+| --- | --- |
+| Script extenders (F4SE, SKSE) | game root (+ their own `Data/` tree) |
+| Crash loggers (Buffout 4, and its `WinHTTP.dll` preloader) | game root |
+| Graphics injectors (ENB, ReShade) | game root |
+| Address Library and other F4SE/SKSE *plugins* | `Data/F4SE/Plugins` |
+
+Get this wrong and the game starts but silently loads none of it - no
+script extender means most of a modlist does nothing. LMM works out which
+kind a mod is from its own layout: a top-level `Data/` folder, or a
+top-level `.dll`/`.exe`/`.asi`, means the mod's paths are written from the
+game root. Those two signals cover the usual packaging conventions, and
+the **Deploys to** column on the Mods tab shows what each mod resolved to,
+so it's visible rather than something you have to infer.
+
+Detection can't be right for every archive ever packaged, so
+**Deploy Target…** overrides it for any selection of mods; a mod that's
+been overridden reads as "(forced)" in that column. If a mod isn't loading,
+that column is the first thing to check.
 
 ### FOMOD installers
 
