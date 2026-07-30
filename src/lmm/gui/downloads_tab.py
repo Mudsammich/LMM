@@ -26,10 +26,27 @@ from PySide6.QtWidgets import (
 from . import context as context_module
 from .. import paths
 from ..models import ModSource
+from ..mods.archive import SUPPORTED_EXTENSIONS
 from ..mods.manager import ModManagerError
 from ..nexus.api import NexusAPIError, NexusRateLimitError
 from ..nexus.collections import CollectionAPIUnavailable, resolve_revision_bundle_url
 from ..nexus.nxm import NxmCollectionLink, NxmModLink, NxmParseError, parse_nxm
+
+
+def mod_name_from_filename(name: str) -> str:
+    """Trims an archive extension off a name destined for the mod list.
+
+    A download row is showing a *file*, so ``Foo_v1.2.zip`` is right there -
+    but carried into the mod list it makes every report read like a
+    directory listing ("AAF_UAP_v2.6.64.zip -> overridden by ..."). Only
+    known archive extensions are removed, so a mod legitimately named with a
+    dot in it keeps its name.
+    """
+    stripped = name.strip()
+    for suffix in SUPPORTED_EXTENSIONS:
+        if stripped.lower().endswith(suffix):
+            return stripped[: -len(suffix)].strip() or stripped
+    return stripped
 
 
 class _DownloadBridge(QObject):
@@ -286,7 +303,8 @@ class DownloadsTab(QWidget):
         if not game:
             return
 
-        name = self.table.item(row, 0).text() if row is not None else Path(dest_path).stem
+        raw_name = self.table.item(row, 0).text() if row is not None else Path(dest_path).name
+        name = mod_name_from_filename(raw_name)
         if row is not None:
             self.table.item(row, 2).setText("installing")
         manager = self.ctx.mod_manager(game_id)
