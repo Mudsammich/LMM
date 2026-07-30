@@ -95,6 +95,7 @@ def register_handler(executable: str | None = None) -> Path:
         "Type=Application\n"
         "Name=LMM (Linux Mod Manager)\n"
         f"Exec={exe} handle-nxm %u\n"
+        "Icon=lmm\n"
         "StartupNotify=false\n"
         "NoDisplay=true\n"
         "MimeType=x-scheme-handler/nxm;\n"

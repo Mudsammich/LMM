@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b0f3d"/>
+      <stop offset="1" stop-color="#3d1a52"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd371"/>
+      <stop offset="1" stop-color="#ff6ec7"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="4" y="4" width="248" height="248" rx="52" fill="url(#bg)"/>
+  <rect x="4" y="4" width="248" height="248" rx="52" fill="none" stroke="#ff6ec7" stroke-width="4" opacity="0.55"/>
+
+  <!-- horizon grid accent -->
+  <g stroke="#2ee6d6" stroke-width="3" opacity="0.6">
+    <line x1="30" y1="198" x2="226" y2="198"/>
+  </g>
+  <g stroke="#ff6ec7" stroke-width="2.5" opacity="0.5">
+    <line x1="128" y1="198" x2="46" y2="236"/>
+    <line x1="128" y1="198" x2="210" y2="236"/>
+    <line x1="128" y1="198" x2="88" y2="236"/>
+    <line x1="128" y1="198" x2="168" y2="236"/>
+  </g>
+
+  <!-- retro sun -->
+  <circle cx="128" cy="120" r="70" fill="url(#sun)"/>
+  <rect x="58" y="130" width="140" height="12" fill="#1b0f3d"/>
+  <rect x="58" y="152" width="140" height="12" fill="#1b0f3d"/>
+  <rect x="58" y="174" width="140" height="12" fill="#1b0f3d"/>
+  <circle cx="128" cy="120" r="70" fill="none" stroke="#2ee6d6" stroke-width="5"/>
+</svg>

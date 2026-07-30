@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -26,6 +27,55 @@ def documents_dir(prefix_path: str | Path) -> Path:
 def is_valid_prefix(prefix_path: str | Path) -> bool:
     p = Path(prefix_path)
     return (p / "drive_c").is_dir() and (p / "user.reg").is_file()
+
+
+# Folders that show up under AppData/Local in most Wine/Proton prefixes
+# regardless of which game runs there - never a game's own profile folder.
+_NON_GAME_LOCAL_APPDATA_FOLDERS = {
+    "microsoft", "temp", "packages", "nvidia", "nvidia corporation", "amd",
+    "d3dscache", "publishers", "steam", "virtualstore",
+    "connecteddevicesplatform", "google", "mozilla", "comms",
+    "elevateddiagnostics", "clientdcinstall", "assembly", "history",
+}
+
+
+def find_local_appdata_candidates(prefix_path: str | Path) -> list[Path]:
+    """Subfolders of the prefix's AppData/Local that could plausibly be a
+    game's own profile folder (where Plugins.txt/loadorder.txt live) -
+    i.e. everything except the common Windows/Wine system folders that
+    appear in every prefix. Returns [] if the prefix has never had
+    anything write local app data yet (e.g. the game has never launched)."""
+    local = app_data_local(prefix_path)
+    if not local.is_dir():
+        return []
+    return sorted(
+        (p for p in local.iterdir() if p.is_dir() and p.name.lower() not in _NON_GAME_LOCAL_APPDATA_FOLDERS),
+        key=lambda p: p.name.lower(),
+    )
+
+
+def _normalize_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def guess_plugins_txt_path(prefix_path: str | Path, game_name: str) -> Path | None:
+    """Best-effort ``Plugins.txt`` path for a game, found by matching
+    ``game_name`` against the prefix's actual local-appdata folders
+    (case/space/punctuation-insensitive - "Fallout 4" matches "Fallout4")
+    rather than guessing a hardcoded per-game folder name. Returns None
+    if there's no exact-enough match and more than one candidate exists,
+    so the caller can ask the user to pick.
+    """
+    candidates = find_local_appdata_candidates(prefix_path)
+    if not candidates:
+        return None
+    target = _normalize_name(game_name)
+    for candidate in candidates:
+        if _normalize_name(candidate.name) == target:
+            return candidate / "Plugins.txt"
+    if len(candidates) == 1:
+        return candidates[0] / "Plugins.txt"
+    return None
 
 
 def run_in_prefix(

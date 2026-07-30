@@ -39,13 +39,15 @@ class ModsTab(QWidget):
         self.table = QTableWidget(0, len(COLUMNS))
         self.table.setHorizontalHeaderLabels(COLUMNS)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)  # ctrl/shift-click multi-select
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
         header.setStretchLastSection(False)
 
         install_btn = QPushButton("Install from archive…")
-        remove_btn = QPushButton("Remove")
+        select_all_btn = QPushButton("Select All")
+        remove_btn = QPushButton("Remove Selected")
+        remove_all_btn = QPushButton("Remove All…")
         up_btn = QPushButton("Move Up")
         down_btn = QPushButton("Move Down")
         deploy_btn = QPushButton("Deploy")
@@ -54,7 +56,9 @@ class ModsTab(QWidget):
         conflicts_btn = QPushButton("Show Conflicts")
 
         install_btn.clicked.connect(self._install_from_archive)
+        select_all_btn.clicked.connect(self.table.selectAll)
         remove_btn.clicked.connect(self._remove_selected)
+        remove_all_btn.clicked.connect(self._remove_all)
         up_btn.clicked.connect(lambda: self._move_selected(-1))
         down_btn.clicked.connect(lambda: self._move_selected(1))
         deploy_btn.clicked.connect(self._deploy)
@@ -62,7 +66,10 @@ class ModsTab(QWidget):
         conflicts_btn.clicked.connect(self._show_conflicts)
 
         button_row = QHBoxLayout()
-        for b in (install_btn, remove_btn, up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn):
+        for b in (
+            install_btn, select_all_btn, remove_btn, remove_all_btn,
+            up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn,
+        ):
             button_row.addWidget(b)
         button_row.addStretch(1)
 
@@ -151,6 +158,10 @@ class ModsTab(QWidget):
             return None
         return self.table.item(rows[0].row(), 0).data(1000)
 
+    def _selected_mod_ids(self) -> list[str]:
+        rows = self.table.selectionModel().selectedRows()
+        return [self.table.item(r.row(), 0).data(1000) for r in rows]
+
     # -- actions -----------------------------------------------------
 
     def _install_from_archive(self) -> None:
@@ -182,13 +193,42 @@ class ModsTab(QWidget):
 
     def _remove_selected(self) -> None:
         game_id = self._current_game_id()
-        mod_id = self._selected_mod_id()
-        if not game_id or not mod_id:
+        mod_ids = self._selected_mod_ids()
+        if not game_id or not mod_ids:
+            QMessageBox.information(self, "Remove mods", "Select one or more mods first (ctrl/shift-click for multiple).")
             return
         manager = self.ctx.mod_manager(game_id)
-        reply = QMessageBox.question(self, "Remove mod", "Delete this mod's staged files too?")
-        manager.remove(mod_id, delete_files=reply == QMessageBox.Yes)
+        reply = QMessageBox.question(
+            self, "Remove mods", f"Delete the staged files for these {len(mod_ids)} mod(s) too?"
+        )
+        manager.remove_many(mod_ids, delete_files=reply == QMessageBox.Yes)
         self.ctx.notify_mods_changed(game_id)
+        self.status_label.setText(f"Removed {len(mod_ids)} mod(s).")
+
+    def _remove_all(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        mod_ids = [m.id for m in manager.list_mods()]
+        if not mod_ids:
+            QMessageBox.information(self, "Remove All", "No mods installed for this game.")
+            return
+        reply = QMessageBox.warning(
+            self,
+            "Remove All",
+            f"Remove all {len(mod_ids)} mods for this game? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        delete_files_reply = QMessageBox.question(self, "Remove All", "Delete their staged files too?")
+        manager.remove_many(mod_ids, delete_files=delete_files_reply == QMessageBox.Yes)
+        self.ctx.notify_mods_changed(game_id)
+        self.status_label.setText(
+            f"Removed all {len(mod_ids)} mod(s). Deploy again to clean up any now-stale links."
+        )
 
     def _move_selected(self, delta: int) -> None:
         game_id = self._current_game_id()

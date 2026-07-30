@@ -124,17 +124,31 @@ lmm
    or a native Linux LOOT build) for real sorting, then **Import from
    Plugins.txt** to pull whatever order it left behind back into LMM.
 
+   Click **Detect…** next to the Plugins.txt path field to find it
+   automatically - it lists the Proton prefix's actual local-appdata
+   folders (filtering out the generic Windows/Wine system ones) and
+   matches by name against the game, rather than guessing a hardcoded
+   per-game folder name. If the game has never been launched in that
+   prefix yet, there's nothing to find - launch it once first.
+7. **Bulk mod management** - the Mods table supports ctrl/shift-click
+   multi-select; **Remove Selected** deletes everything selected in one
+   confirmation instead of one at a time, and **Remove All…** clears a
+   game's entire mod list in one step (handy for starting over after a
+   big collection install).
+
 ## Project layout
 
 ```
 src/lmm/
   config.py, models.py, paths.py   application config & data model
+  assets/                          bundled app icon (source SVG)
   nexus/                           Nexus Mods API client, nxm:// links, collections
   proton/                          Steam library/app/Proton discovery, prefix linking
   mods/                            archive extraction, downloader, deploy engine, ModManager
   gui/                             PySide6 main window and tabs
 tests/                             pytest suite for everything above the GUI layer
-packaging/                         PKGBUILD + .desktop file for Arch/CachyOS
+packaging/                         PKGBUILD, .desktop file, and generated hicolor icons for Arch/CachyOS
+scripts/generate_icons.py          regenerates packaging/icons/ from src/lmm/assets/icon.svg
 ```
 
 The GUI is a thin layer over `mods/manager.py`, `mods/deploy.py`,

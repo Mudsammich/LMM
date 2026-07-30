@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..models import DeployMethod, Game
 from ..mods.manager import slugify
+from ..proton import prefix as proton_prefix
 from ..proton import steam as proton_steam
 
 
@@ -98,7 +100,21 @@ class AddEditGameDialog(QDialog):
         form.addRow("Game executable (.exe)", _browse_row(self.launch_exe_edit, directory=False, parent=self))
         form.addRow("Deploy method", self.deploy_method_combo)
         form.addRow(self.manages_plugins_check)
-        form.addRow("Plugins.txt path", _browse_row(self.plugins_txt_edit, directory=False, parent=self))
+        plugins_txt_row = QWidget()
+        plugins_txt_layout = QHBoxLayout(plugins_txt_row)
+        plugins_txt_layout.setContentsMargins(0, 0, 0, 0)
+        plugins_txt_layout.addWidget(self.plugins_txt_edit)
+        plugins_txt_browse_btn = QPushButton("Browse…")
+        plugins_txt_browse_btn.clicked.connect(self._browse_plugins_txt)
+        plugins_txt_layout.addWidget(plugins_txt_browse_btn)
+        plugins_txt_detect_btn = QPushButton("Detect…")
+        plugins_txt_detect_btn.setToolTip(
+            "Finds this in the Proton prefix set above, by matching the game's "
+            "own local-data folder name - set the prefix path first."
+        )
+        plugins_txt_detect_btn.clicked.connect(self._detect_plugins_txt)
+        plugins_txt_layout.addWidget(plugins_txt_detect_btn)
+        form.addRow("Plugins.txt path", plugins_txt_row)
         form.addRow(self.network_isolated_check)
         form.addRow(detect_button)
 
@@ -118,8 +134,6 @@ class AddEditGameDialog(QDialog):
             QMessageBox.information(self, "Detect from Steam", "No Steam apps found.")
             return
         names = [f"{a.name} ({a.appid})" for a in apps]
-        from PySide6.QtWidgets import QInputDialog
-
         choice, ok = QInputDialog.getItem(self, "Detect from Steam", "Select an installed app:", names, 0, False)
         if not ok:
             return
@@ -132,6 +146,43 @@ class AddEditGameDialog(QDialog):
         builds = proton_steam.find_proton_builds()
         if builds:
             self.proton_version_edit.setText(str(builds[-1].path))
+
+    def _browse_plugins_txt(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select Plugins.txt", self.plugins_txt_edit.text())
+        if path:
+            self.plugins_txt_edit.setText(path)
+
+    def _detect_plugins_txt(self) -> None:
+        prefix = self.prefix_edit.text().strip()
+        if not prefix:
+            QMessageBox.information(self, "Detect Plugins.txt", "Set a Proton prefix path first.")
+            return
+
+        name = self.name_edit.text().strip()
+        guess = proton_prefix.guess_plugins_txt_path(prefix, name) if name else None
+        if guess:
+            self.plugins_txt_edit.setText(str(guess))
+            return
+
+        candidates = proton_prefix.find_local_appdata_candidates(prefix)
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "Detect Plugins.txt",
+                "No local app-data folders found in this prefix yet. Launch the "
+                "game once (even just to the main menu) so it creates its own "
+                "profile folder, then try again.",
+            )
+            return
+
+        names = [c.name for c in candidates]
+        choice, ok = QInputDialog.getItem(
+            self, "Detect Plugins.txt", "Multiple candidates found - pick the game's folder:", names, 0, False
+        )
+        if not ok:
+            return
+        chosen = candidates[names.index(choice)]
+        self.plugins_txt_edit.setText(str(chosen / "Plugins.txt"))
 
     def _on_accept(self) -> None:
         name = self.name_edit.text().strip()

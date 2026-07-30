@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
+from . import paths
 from .gui import theme
 from .gui.ipc import NxmIpcServer, send_to_running_instance
 from .gui.main_window import MainWindow
@@ -27,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_gui(app: QApplication, initial_url: str | None = None) -> int:
     theme.apply_theme(app)
+    app.setWindowIcon(QIcon(str(paths.icon_path())))
     window = MainWindow()
 
     ipc_server = NxmIpcServer(window)

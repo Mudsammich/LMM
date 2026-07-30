@@ -117,14 +117,24 @@ class ModManager:
         return mod
 
     def remove(self, mod_id: str, delete_files: bool = True) -> None:
+        self.remove_many([mod_id], delete_files=delete_files)
+
+    def remove_many(self, mod_ids: list[str], delete_files: bool = True) -> list[InstalledMod]:
+        """Removes several mods in one locked section (a single JSON save
+        instead of one per mod, so bulk deletes of a large modlist don't
+        hammer disk I/O). All-or-nothing: an unknown id raises without
+        removing anything, so a bulk removal can't partially apply."""
         with self._lock:
-            mod = self._mods.pop(mod_id, None)
-            if mod is None:
-                raise ModManagerError(f"No such mod: {mod_id}")
+            missing = [mid for mid in mod_ids if mid not in self._mods]
+            if missing:
+                raise ModManagerError(f"No such mod(s): {missing}")
+            removed = [self._mods.pop(mod_id) for mod_id in mod_ids]
             self._save()
         if delete_files:
-            staging_path = Path(self.game.mods_dir) / mod.staging_subdir
-            shutil.rmtree(staging_path, ignore_errors=True)
+            for mod in removed:
+                staging_path = Path(self.game.mods_dir) / mod.staging_subdir
+                shutil.rmtree(staging_path, ignore_errors=True)
+        return removed
 
     # -- enable / ordering -----------------------------------------------------
 

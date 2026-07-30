@@ -100,6 +100,36 @@ def test_remove_deletes_staged_files_when_requested(tmp_path, game):
     assert not staged_dir.exists()
 
 
+def test_remove_many_deletes_all_given_mods(tmp_path, game):
+    archive_path = tmp_path / "mod.zip"
+    _make_zip(archive_path, {"file.txt": "hi"})
+    manager = ModManager(game)
+    mods = [manager.install_from_archive(archive_path, f"Mod {i}") for i in range(5)]
+
+    to_remove = [m.id for m in mods[:3]]
+    removed = manager.remove_many(to_remove, delete_files=True)
+
+    assert {m.id for m in removed} == set(to_remove)
+    remaining_ids = {m.id for m in manager.list_mods()}
+    assert remaining_ids == {mods[3].id, mods[4].id}
+    for mod_id in to_remove:
+        staged_dir = tmp_path / "mods_staging" / mod_id
+        assert not staged_dir.exists()
+
+
+def test_remove_many_is_all_or_nothing_on_unknown_id(tmp_path, game):
+    archive_path = tmp_path / "mod.zip"
+    _make_zip(archive_path, {"file.txt": "hi"})
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "A")
+
+    with pytest.raises(ModManagerError, match="No such mod"):
+        manager.remove_many([mod.id, "does-not-exist"])
+
+    # Nothing removed - the valid id in the batch must survive the failure.
+    assert manager.get(mod.id) is not None
+
+
 def test_deploy_end_to_end_through_manager(tmp_path, game):
     archive_path = tmp_path / "mod.zip"
     _make_zip(archive_path, {"textures/rock.dds": "data", "mod.esp": "esp"})
