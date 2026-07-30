@@ -282,6 +282,30 @@ wrong is worse than not automating it. Use the real thing instead:
 3. Run LOOT's sort, review the diff it shows you, apply.
 4. Back in LMM, **Import from Plugins.txt** to pull LOOT's result back in.
 
+### 6. When a modded game won't start
+
+Games tab → **Diagnose…** checks the two things that most often make a
+correctly-deployed modlist fail, both of which live inside the Proton prefix
+where they're easy to miss:
+
+- **Archive invalidation.** Bethesda games ship their assets in `.ba2`/`.bsa`
+  archives, and by default a loose file on disk does *not* override what's
+  inside them. LMM deploys everything as loose files, so without archive
+  invalidation a perfectly-deployed modlist has no visible effect at all -
+  the game quietly keeps using its packed vanilla assets. Diagnose reports
+  whether it's set up and offers to write the settings into the game's
+  `<Game>Custom.ini`, preserving whatever's already there. Note that having
+  only `bInvalidateOlderFiles=1` is the usual half-applied case and does not
+  work; `sResourceDataDirsFinal=` must be present and empty too.
+- **Script extender and crash logs.** Diagnose lists every log under
+  `My Games/<game>` newest-first and inlines the newest one. If the game
+  crashes, the crash log (Buffout 4 on Fallout 4, Crash Logger on Skyrim)
+  names the module that actually faulted - that's the fastest route to the
+  culprit. No logs at all after launching through a script extender usually
+  means the extender never injected: check its loader is deploying to the
+  game root (Mods tab, **Deploys to**) and that its version matches the
+  game's.
+
 ## Project layout
 
 ```
@@ -307,27 +331,3 @@ and unit tested; the tabs mostly wire widgets to those calls.
 pip install -e ".[dev]"
 pytest
 ```
-
-### When a modded game won't start
-
-Games tab → **Diagnose…** checks the two things that most often make a
-correctly-deployed modlist fail, both of which live inside the Proton prefix
-where they're easy to miss:
-
-- **Archive invalidation.** Bethesda games ship their assets in `.ba2`/`.bsa`
-  archives, and by default a loose file on disk does *not* override what's
-  inside them. LMM deploys everything as loose files, so without archive
-  invalidation a perfectly-deployed modlist has no visible effect at all -
-  the game quietly keeps using its packed vanilla assets. Diagnose reports
-  whether it's set up and offers to write the settings into the game's
-  `<Game>Custom.ini`, preserving whatever's already there. Note that having
-  only `bInvalidateOlderFiles=1` is the usual half-applied case and does not
-  work; `sResourceDataDirsFinal=` must be present and empty too.
-- **Script extender and crash logs.** Diagnose lists every log under
-  `My Games/<game>` newest-first and inlines the newest one. If the game
-  crashes, the crash log (Buffout 4 on Fallout 4, Crash Logger on Skyrim)
-  names the module that actually faulted - that's the fastest route to the
-  culprit. No logs at all after launching through a script extender usually
-  means the extender never injected: check its loader is deploying to the
-  game root (Mods tab, **Deploys to**) and that its version matches the
-  game's.
