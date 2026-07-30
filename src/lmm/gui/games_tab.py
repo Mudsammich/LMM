@@ -13,9 +13,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from datetime import datetime
+
 from .context import AppContext
 from .dialogs import AddEditGameDialog
-from ..proton import prefix as proton_prefix
+from .text_report_dialog import TextReportDialog
+from ..proton import diagnostics, prefix as proton_prefix
 from ..proton.sandbox import NetworkIsolationUnavailable
 
 COLUMNS = ["Name", "Nexus domain", "Install path", "Proton prefix", "Network", "Deploy method"]
@@ -40,16 +43,19 @@ class GamesTab(QWidget):
         remove_btn = QPushButton("Remove")
         launch_btn = QPushButton("Launch Game")
         launch_btn.setProperty("role", "primary")
+        diagnose_btn = QPushButton("Diagnose…")
         add_btn.clicked.connect(self._add_game)
         edit_btn.clicked.connect(self._edit_game)
         remove_btn.clicked.connect(self._remove_game)
         launch_btn.clicked.connect(self._launch_game)
+        diagnose_btn.clicked.connect(self._diagnose)
 
         button_row = QHBoxLayout()
         button_row.addWidget(add_btn)
         button_row.addWidget(edit_btn)
         button_row.addWidget(remove_btn)
         button_row.addWidget(launch_btn)
+        button_row.addWidget(diagnose_btn)
         button_row.addStretch(1)
 
         layout = QVBoxLayout(self)
@@ -136,6 +142,76 @@ class GamesTab(QWidget):
             QMessageBox.critical(self, "Launch Game", str(exc))
         except (FileNotFoundError, RuntimeError) as exc:
             QMessageBox.critical(self, "Launch Game", str(exc))
+
+    def _diagnose(self) -> None:
+        """Checks the things that stop a correctly-deployed modlist from
+        working, and surfaces the script extender / crash logs that say what
+        actually went wrong."""
+        game_id = self._selected_game_id()
+        if not game_id:
+            QMessageBox.information(self, "Diagnose", "Select a game first.")
+            return
+        game = self.ctx.config.games[game_id]
+        if not game.proton_prefix:
+            QMessageBox.warning(self, "Diagnose", "Set this game's Proton prefix first (Edit…).")
+            return
+
+        folder = diagnostics.guess_game_folder(game.name, game.plugins_txt_path)
+        status = diagnostics.check_archive_invalidation(game.proton_prefix, folder)
+        logs = diagnostics.find_game_logs(game.proton_prefix, folder)
+
+        lines = [
+            f"Game folder in prefix: {folder}",
+            "",
+            "ARCHIVE INVALIDATION",
+            "-" * 60,
+            ("OK - " if status.enabled else "PROBLEM - ") + status.detail,
+            f"ini: {status.ini_path}",
+            "",
+            "SCRIPT EXTENDER / CRASH LOGS",
+            "-" * 60,
+        ]
+        if not logs:
+            lines.append(
+                "No logs found. If you launched through a script extender and it "
+                "crashed, no log at all usually means the extender never injected - "
+                "check its loader is deployed to the game root (Mods tab, "
+                "'Deploys to' column) and that its version matches the game's."
+            )
+        else:
+            lines.append("Newest first - the crash log names what actually crashed:")
+            lines.append("")
+            for log in logs:
+                stamp = datetime.fromtimestamp(log.modified).strftime("%Y-%m-%d %H:%M")
+                lines.append(f"  {stamp}  {log.size:>9,} B  {log.path.name}")
+                lines.append(f"      {log.path}")
+
+        if logs:
+            newest = logs[0]
+            lines += ["", "=" * 60, f"NEWEST LOG: {newest.path.name}", "=" * 60, ""]
+            lines.append(diagnostics.read_log_tail(newest.path))
+
+        dialog = TextReportDialog(f"Diagnose - {game.name}", "\n".join(lines), parent=self)
+        dialog.exec()
+
+        if not status.enabled:
+            reply = QMessageBox.question(
+                self,
+                "Archive invalidation",
+                "Set up archive invalidation now?\n\n"
+                f"This writes the [Archive] settings into {status.ini_path}, keeping "
+                "anything already in that file. Without them the game ignores every "
+                "loose file LMM deploys, so mods appear to do nothing.",
+            )
+            if reply == QMessageBox.Yes:
+                try:
+                    written = diagnostics.enable_archive_invalidation(game.proton_prefix, folder)
+                except OSError as exc:
+                    QMessageBox.critical(self, "Archive invalidation", f"{type(exc).__name__}: {exc}")
+                    return
+                QMessageBox.information(
+                    self, "Archive invalidation", f"Written to {written}"
+                )
 
     def _remove_game(self) -> None:
         game_id = self._selected_game_id()

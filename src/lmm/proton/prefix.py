@@ -20,8 +20,27 @@ def app_data_local(prefix_path: str | Path) -> Path:
     return default_wine_user_dir(prefix_path) / "AppData" / "Local"
 
 
+# Modern Proton creates "Documents"; older Wine/Proton prefixes use
+# "My Documents" (sometimes as a symlink to the former). Which one a given
+# prefix has depends on how old it is, so both have to be accepted - looking
+# in only one is the difference between finding a game's logs and reporting
+# that it has none.
+_DOCUMENTS_DIR_NAMES = ("Documents", "My Documents")
+
+
 def documents_dir(prefix_path: str | Path) -> Path:
-    return default_wine_user_dir(prefix_path) / "My Documents"
+    """The prefix's Documents folder, where ``My Games/<game>`` lives.
+
+    Returns whichever spelling the prefix actually has, falling back to the
+    modern one when the prefix has neither yet (so anything we create uses
+    the name current Proton expects).
+    """
+    user_dir = default_wine_user_dir(prefix_path)
+    for name in _DOCUMENTS_DIR_NAMES:
+        candidate = user_dir / name
+        if candidate.is_dir() or candidate.is_symlink():
+            return candidate
+    return user_dir / _DOCUMENTS_DIR_NAMES[0]
 
 
 def is_valid_prefix(prefix_path: str | Path) -> bool:
