@@ -51,6 +51,38 @@ otherwise every Windows-packaged mod is subtly broken here:
   real payload root on install and hoists it up, leaving genuinely
   ambiguous archives alone rather than guessing.
 
+### FOMOD installers
+
+Plenty of Nexus mods ship a **FOMOD** - the "choose your options" wizard
+you'd see in Vortex or MO2, driven by a `fomod/ModuleConfig.xml` script in
+the archive. Without support for it, extracting one dumps the installer's
+own scaffolding straight into the game, which is why an unhandled FOMOD
+leaves folders like `00 Core`, `01 - ESP` and `Optional` sitting in your
+Data directory.
+
+LMM runs the installer properly:
+
+- Installing a FOMOD archive from the Mods tab opens the wizard - one page
+  per install step, with the author's descriptions, radio buttons or
+  checkboxes according to what the group allows, and recommended options
+  pre-picked so you can click straight through. Options the installer rules
+  out based on your earlier answers are greyed out and labelled, and pages
+  that no longer apply are skipped.
+- Only the files your choices resolve to get staged, so the scaffolding
+  never reaches the game.
+- **Bulk installs never prompt.** Queueing a 900-mod collection can't stop
+  to ask 200 questions, so those installs silently take the installer's own
+  Required/Recommended defaults - the author's intended setup. If you want
+  different options for a specific mod, reinstall just that one from the
+  Mods tab and the wizard appears.
+- A FOMOD script that's broken or references files the archive doesn't
+  contain falls back to installing the archive whole, rather than failing -
+  a mod with a bad installer script is still a mod.
+
+Not supported: game-version dependency checks (there's no meaningful
+version to compare against under Proton, and installers treat them as
+advisory) and option preview images.
+
 ## Screenshots
 
 | Games | Mods |
@@ -224,7 +256,7 @@ src/lmm/
   assets/                          bundled app icon (source SVG)
   nexus/                           Nexus Mods API client, nxm:// links, collections
   proton/                          Steam library/app/Proton discovery, prefix linking
-  mods/                            archive extraction, downloader, deploy engine, ModManager
+  mods/                            archive extraction, downloader, deploy engine, FOMOD installer, ModManager
   gui/                             PySide6 main window and tabs
 tests/                             pytest suite for everything above the GUI layer
 packaging/                         PKGBUILD, .desktop file, and generated hicolor icons for Arch/CachyOS

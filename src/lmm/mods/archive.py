@@ -160,6 +160,19 @@ def find_payload_root(extracted_dir: str | Path) -> Path:
     return current
 
 
+def move_children(source_dir: Path, dest_dir: Path) -> None:
+    """Moves everything inside ``source_dir`` into ``dest_dir``, replacing
+    same-named entries. ``source_dir`` is left empty but not removed."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for child in list(source_dir.iterdir()):
+        dest = dest_dir / child.name
+        if dest.is_dir() and not dest.is_symlink():
+            shutil.rmtree(dest, ignore_errors=True)
+        elif dest.exists() or dest.is_symlink():
+            dest.unlink()
+        child.rename(dest)
+
+
 def flatten_payload_root(staging_dir: str | Path) -> Path | None:
     """Hoists the real payload up so it sits directly in ``staging_dir``.
 
@@ -184,12 +197,6 @@ def flatten_payload_root(staging_dir: str | Path) -> Path | None:
     payload.rename(holding)
     shutil.rmtree(wrapper_top, ignore_errors=True)
 
-    for child in list(holding.iterdir()):
-        dest = staging_dir / child.name
-        if dest.is_dir() and not dest.is_symlink():
-            shutil.rmtree(dest, ignore_errors=True)
-        elif dest.exists() or dest.is_symlink():
-            dest.unlink()
-        child.rename(dest)
+    move_children(holding, staging_dir)
     holding.rmdir()
     return payload

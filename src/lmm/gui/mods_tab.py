@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -21,8 +22,11 @@ from PySide6.QtWidgets import (
 )
 
 from .context import AppContext
+from .fomod_dialog import FomodDialog
 from ..mods.archive import SUPPORTED_EXTENSIONS
-from ..mods.manager import ModManagerError
+from ..mods.fomod import FomodConfig
+from ..mods.fomod_install import InstallState
+from ..mods.manager import InstallCancelled, ModManagerError
 
 COLUMNS = ["On", "Priority", "Name", "Source"]
 PLUGIN_COLUMNS = ["On", "Plugin"]
@@ -187,11 +191,24 @@ class ModsTab(QWidget):
 
         manager = self.ctx.mod_manager(game_id)
         try:
-            manager.install_from_archive(path, name)
+            manager.install_from_archive(path, name, fomod_chooser=self._run_fomod_wizard)
+        except InstallCancelled:
+            self.status_label.setText("Install cancelled.")
+            return
         except ModManagerError as exc:
             QMessageBox.critical(self, "Install failed", str(exc))
             return
         self.ctx.notify_mods_changed(game_id)
+
+    def _run_fomod_wizard(self, config: FomodConfig) -> InstallState | None:
+        """Shown when an archive carries a FOMOD installer script. Returns
+        the user's choices, or None if they cancelled."""
+        dialog = FomodDialog(config, self)
+        if dialog.needs_no_input:
+            return dialog.state
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return dialog.state
 
     def _remove_selected(self) -> None:
         game_id = self._current_game_id()

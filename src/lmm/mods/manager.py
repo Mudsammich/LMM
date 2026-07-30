@@ -10,9 +10,15 @@ import shutil
 import threading
 from pathlib import Path
 
+from typing import Callable
+
 from .. import paths
 from ..models import DeployMethod, Game, InstalledMod, ModSource
-from . import archive, deploy, plugins as plugins_module, sorter
+from . import archive, deploy, fomod as fomod_module, fomod_install, plugins as plugins_module, sorter
+
+# Called with the parsed installer script; returns the user's choices, or
+# None if they cancelled.
+FomodChooser = Callable[[fomod_module.FomodConfig], "fomod_install.InstallState | None"]
 
 
 def slugify(text: str) -> str:
@@ -22,6 +28,11 @@ def slugify(text: str) -> str:
 
 class ModManagerError(RuntimeError):
     pass
+
+
+class InstallCancelled(ModManagerError):
+    """The user backed out of a FOMOD installer wizard. Not really a
+    failure - callers should stay quiet rather than report an error."""
 
 
 class ModManager:
@@ -79,12 +90,21 @@ class ModManager:
         display_name: str,
         source: ModSource | None = None,
         priority: int | None = None,
+        fomod_chooser: FomodChooser | None = None,
     ) -> InstalledMod:
         """``priority``, if given, is used as-is instead of appending at
         the end of the current list - lets a caller installing many mods
         at once (e.g. a whole Collection, downloaded concurrently and so
         completing out of order) preserve a specific intended order rather
-        than whichever order downloads happened to finish in."""
+        than whichever order downloads happened to finish in.
+
+        ``fomod_chooser`` is called when the archive turns out to carry a
+        FOMOD installer script, and should return the user's choices (or
+        None if they cancelled, which raises ``InstallCancelled``). Omit it
+        - as bulk installs must, since they run off the GUI thread and
+        can't prompt hundreds of times - and the installer's own
+        Required/Recommended defaults are used instead.
+        """
         archive_path = Path(archive_path)
         if not archive.is_supported(archive_path):
             raise ModManagerError(f"Unsupported archive format: {archive_path.suffix}")
@@ -104,11 +124,25 @@ class ModManager:
             dest = mods_dir / staging_subdir
             dest.mkdir(parents=True)  # reserve the slot so concurrent installs can't collide
 
-        archive.extract(archive_path, dest)  # slow - deliberately outside the lock
-        # Archives often wrap their payload in an extra Data/ or
-        # "My Mod v1.2" folder; without this the whole mod deploys one
-        # level too deep and the game never sees it.
-        archive.flatten_payload_root(dest)
+        # Extract to a scratch dir rather than straight into staging: a
+        # FOMOD needs its whole payload available to copy a *selection*
+        # out of, and only the selection should end up staged.
+        scratch = mods_dir / f".{staging_subdir}.extract"
+        shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            archive.extract(archive_path, scratch)  # slow - deliberately outside the lock
+            # Archives often wrap their payload in an extra Data/ or
+            # "My Mod v1.2" folder; without this the whole mod deploys one
+            # level too deep and the game never sees it.
+            archive.flatten_payload_root(scratch)
+            self._stage_payload(scratch, dest, fomod_chooser)
+        except BaseException:
+            # Never leave a half-populated staging dir behind for the
+            # deploy engine to trip over - including on cancellation.
+            shutil.rmtree(dest, ignore_errors=True)
+            raise
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
         mod_id = staging_subdir
         with self._lock:
@@ -128,6 +162,42 @@ class ModManager:
             self._mods[mod.id] = mod
             self._save()
         return mod
+
+    def _stage_payload(
+        self,
+        extracted: Path,
+        dest: Path,
+        fomod_chooser: FomodChooser | None,
+    ) -> None:
+        """Puts the files that should actually be installed into ``dest``.
+        For an ordinary archive that's everything; for a FOMOD it's only
+        what the chosen options resolve to."""
+        config_path = fomod_module.find_module_config(extracted)
+        if config_path is None:
+            archive.move_children(extracted, dest)
+            return
+
+        try:
+            config = fomod_module.parse_module_config(config_path)
+        except fomod_module.FomodError:
+            # A mod with a broken installer script is still a mod - fall
+            # back to installing it whole rather than failing outright.
+            archive.move_children(extracted, dest)
+            return
+
+        if fomod_chooser is not None and config.has_choices:
+            state = fomod_chooser(config)
+            if state is None:
+                raise InstallCancelled(f"Installation of {config.module_name or 'mod'} cancelled.")
+        else:
+            state = fomod_install.default_state(config)
+
+        resolved = fomod_install.resolve_files(config, state)
+        staged = fomod_install.stage_resolved_files(extracted, resolved, dest)
+        if staged == 0:
+            # The script resolved to nothing usable (sources that don't
+            # match the archive, say). Better a whole mod than an empty one.
+            archive.move_children(extracted, dest)
 
     def remove(self, mod_id: str, delete_files: bool = True) -> None:
         self.remove_many([mod_id], delete_files=delete_files)

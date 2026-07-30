@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from lmm.models import Game
-from lmm.mods.manager import ModManager, ModManagerError, slugify
+from lmm.mods.fomod_install import InstallState
+from lmm.mods.manager import InstallCancelled, ModManager, ModManagerError, slugify
 
 
 @pytest.fixture
@@ -326,6 +327,109 @@ def test_install_flattens_a_data_wrapped_archive(tmp_path, game):
     assert (staging / "Textures" / "thing.dds").is_file()
     assert (staging / "mod.esp").is_file()
     assert not (staging / "Data").exists()
+
+
+_FOMOD_CONFIG = """<config>
+  <moduleName>Fancy Mod</moduleName>
+  <requiredInstallFiles>
+    <folder source="00 Core" destination=""/>
+  </requiredInstallFiles>
+  <installSteps order="Explicit">
+    <installStep name="Flavour">
+      <optionalFileGroups order="Explicit">
+        <group name="Pick one" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Red">
+              <description>Red version</description>
+              <files><folder source="01 Red" destination=""/></files>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="Blue">
+              <description>Blue version</description>
+              <files><folder source="02 Blue" destination=""/></files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>
+"""
+
+
+def _make_fomod_zip(path):
+    _make_zip(
+        path,
+        {
+            "fomod/ModuleConfig.xml": _FOMOD_CONFIG,
+            "00 Core/Textures/base.dds": "base",
+            "01 Red/Textures/colour.dds": "red",
+            "02 Blue/Textures/colour.dds": "blue",
+        },
+    )
+
+
+def test_fomod_install_uses_author_defaults_without_a_chooser(tmp_path, game):
+    """A bulk install can't prompt, so it takes the installer's own
+    Required/Recommended defaults - never the raw scaffolding."""
+    archive_path = tmp_path / "fancy.zip"
+    _make_fomod_zip(archive_path)
+
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "Fancy Mod")
+
+    staging = tmp_path / "mods_staging" / mod.staging_subdir
+    assert (staging / "Textures" / "base.dds").read_text() == "base"
+    assert (staging / "Textures" / "colour.dds").read_text() == "red"  # Recommended
+    # The installer's scaffolding must not survive into the mod.
+    assert not (staging / "00 Core").exists()
+    assert not (staging / "01 Red").exists()
+    assert not (staging / "02 Blue").exists()
+
+
+def test_fomod_chooser_selection_is_honoured(tmp_path, game):
+    archive_path = tmp_path / "fancy.zip"
+    _make_fomod_zip(archive_path)
+
+    def choose_blue(config):
+        state = InstallState()
+        state.select((0, 0, 1))  # Blue
+        return state
+
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "Fancy Mod", fomod_chooser=choose_blue)
+
+    staging = tmp_path / "mods_staging" / mod.staging_subdir
+    assert (staging / "Textures" / "colour.dds").read_text() == "blue"
+
+
+def test_fomod_cancel_leaves_nothing_behind(tmp_path, game):
+    archive_path = tmp_path / "fancy.zip"
+    _make_fomod_zip(archive_path)
+
+    manager = ModManager(game)
+    with pytest.raises(InstallCancelled):
+        manager.install_from_archive(archive_path, "Fancy Mod", fomod_chooser=lambda config: None)
+
+    assert manager.list_mods() == []
+    assert not (tmp_path / "mods_staging" / "fancy-mod").exists()
+    # And the scratch extraction dir is cleaned up too.
+    assert list((tmp_path / "mods_staging").glob(".*")) == []
+
+
+def test_broken_fomod_script_falls_back_to_installing_whole_archive(tmp_path, game):
+    archive_path = tmp_path / "broken.zip"
+    _make_zip(
+        archive_path,
+        {"fomod/ModuleConfig.xml": "<config><unclosed", "Textures/thing.dds": "x"},
+    )
+
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "Broken Fomod")
+
+    staging = tmp_path / "mods_staging" / mod.staging_subdir
+    assert (staging / "Textures" / "thing.dds").read_text() == "x"
 
 
 def test_suggest_reorder_moves_patch_after_the_mod_it_patches(tmp_path, game):

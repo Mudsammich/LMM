@@ -205,6 +205,32 @@ QCheckBox::indicator:checked {{
     border-color: {NEON_PINK};
 }}
 
+/* Radio buttons: same look as checkboxes but round, for the FOMOD
+   installer's "choose exactly one" option groups. */
+QRadioButton::indicator {{
+    width: 15px;
+    height: 15px;
+    border: 2px solid {NEON_CYAN_DIM};
+    border-radius: 9px;
+    background-color: {BG_FIELD};
+}}
+
+QRadioButton::indicator:checked {{
+    background-color: {NEON_PINK};
+    border-color: {NEON_PINK};
+}}
+
+/* An option a FOMOD has ruled out has to *look* unavailable, not just say
+   so - the label alone is easy to miss in a long list. */
+QCheckBox:disabled, QRadioButton:disabled {{
+    color: {TEXT_DISABLED};
+}}
+
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{
+    border-color: {BORDER_DIM};
+    background-color: {BG_PANEL};
+}}
+
 /* -- tables / lists -------------------------------------------------------- */
 
 QTableWidget, QListWidget {{
