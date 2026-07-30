@@ -107,3 +107,61 @@ def test_undeploy_never_touches_files_it_did_not_create(tmp_path):
 
     assert dest.exists()
     assert dest.read_text() == "real game file, not ours anymore"
+
+
+# -- case merging -----------------------------------------------------
+
+
+def test_case_differing_folders_merge_into_one(tmp_path):
+    """Windows-packaged mods disagree about capitalisation; on Linux those
+    must still land in a single folder or the game only finds one."""
+    mods_dir = tmp_path / "mods"
+    _make_mod_file(mods_dir, "mod-a", "Meshes/thing.nif", "from A")
+    _make_mod_file(mods_dir, "mod-b", "meshes/other.nif", "from B")
+
+    mod_a = InstalledMod(id="mod-a", name="A", game_id="g", staging_subdir="mod-a", priority=0)
+    mod_b = InstalledMod(id="mod-b", name="B", game_id="g", staging_subdir="mod-b", priority=1)
+
+    plan = deploy.build_plan(mods_dir, [mod_a, mod_b])
+
+    parents = {Path(key).parts[0] for key in plan.links}
+    assert parents == {"Meshes"}  # first spelling seen wins, both merged
+
+
+def test_case_differing_same_file_is_a_conflict(tmp_path):
+    mods_dir = tmp_path / "mods"
+    _make_mod_file(mods_dir, "mod-a", "Textures/Thing.DDS", "from A")
+    _make_mod_file(mods_dir, "mod-b", "textures/thing.dds", "from B")
+
+    mod_a = InstalledMod(id="mod-a", name="A", game_id="g", staging_subdir="mod-a", priority=0)
+    mod_b = InstalledMod(id="mod-b", name="B", game_id="g", staging_subdir="mod-b", priority=1)
+
+    plan = deploy.build_plan(mods_dir, [mod_a, mod_b])
+
+    assert len(plan.links) == 1
+    assert list(plan.conflicts.values()) == [["mod-a", "mod-b"]]
+    # Later mod still wins, exactly as it would have on Windows.
+    assert list(plan.links.values())[0] == mods_dir / "mod-b" / "textures/thing.dds"
+
+
+def test_seeding_from_target_adopts_the_games_capitalisation(tmp_path):
+    mods_dir = tmp_path / "mods"
+    target_dir = tmp_path / "game" / "Data"
+    (target_dir / "Textures").mkdir(parents=True)  # the game's own spelling
+    _make_mod_file(mods_dir, "mod-a", "textures/thing.dds", "from A")
+
+    mod_a = InstalledMod(id="mod-a", name="A", game_id="g", staging_subdir="mod-a", priority=0)
+    plan = deploy.build_plan(mods_dir, [mod_a], target_dir=target_dir)
+
+    assert list(plan.links) == ["Textures/thing.dds"]
+
+
+def test_fomod_metadata_is_not_deployed(tmp_path):
+    mods_dir = tmp_path / "mods"
+    _make_mod_file(mods_dir, "mod-a", "fomod/ModuleConfig.xml", "<config/>")
+    _make_mod_file(mods_dir, "mod-a", "Textures/thing.dds", "real content")
+
+    mod_a = InstalledMod(id="mod-a", name="A", game_id="g", staging_subdir="mod-a", priority=0)
+    plan = deploy.build_plan(mods_dir, [mod_a])
+
+    assert list(plan.links) == ["Textures/thing.dds"]

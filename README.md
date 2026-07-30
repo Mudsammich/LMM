@@ -32,6 +32,25 @@ This mirrors the "simple" deployment mode of MO2/Vortex, minus the
 Windows-only virtual filesystem trick - on Linux, symlinks into the real
 game directory are the reliable option under Proton.
 
+### Two things Linux needs that Windows doesn't
+
+Mod archives are packaged for Windows mod managers, and two of their
+habits break a naive extract-and-copy on Linux. LMM handles both, because
+otherwise every Windows-packaged mod is subtly broken here:
+
+- **Capitalisation.** Windows and NTFS are case-insensitive, so authors
+  ship `Meshes` or `meshes`, `Scripts` or `SCRIPTS`, and the game never
+  notices. On Linux those are genuinely different directories, and the
+  game finds only one of them - so an unmerged deploy leaves `Textures`
+  sitting next to `textures` in your Data folder with half your mods
+  invisible. LMM picks one canonical spelling per folder and merges them,
+  preferring the game's own capitalisation where it already exists.
+- **Wrapper folders.** Many archives wrap their real payload in an extra
+  `Data/` (mirroring where files end up) or a `My Cool Mod v1.2` folder.
+  Deployed literally, every file sits one level too deep. LMM detects the
+  real payload root on install and hoists it up, leaving genuinely
+  ambiguous archives alone rather than guessing.
+
 ## Screenshots
 
 | Games | Mods |

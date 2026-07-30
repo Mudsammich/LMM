@@ -105,6 +105,10 @@ class ModManager:
             dest.mkdir(parents=True)  # reserve the slot so concurrent installs can't collide
 
         archive.extract(archive_path, dest)  # slow - deliberately outside the lock
+        # Archives often wrap their payload in an extra Data/ or
+        # "My Mod v1.2" folder; without this the whole mod deploys one
+        # level too deep and the game never sees it.
+        archive.flatten_payload_root(dest)
 
         mod_id = staging_subdir
         with self._lock:
@@ -172,8 +176,19 @@ class ModManager:
         with self._lock:
             return sorted((m for m in self._mods.values() if m.enabled), key=lambda m: m.priority)
 
+    def _build_plan(self) -> deploy.DeployPlan:
+        """The deploy plan for the currently enabled mods. Always built
+        against the real target directory so case-merging matches the
+        game's own folder capitalisation - a preview that canonicalised
+        differently from the real deploy would be misleading."""
+        return deploy.build_plan(
+            Path(self.game.mods_dir),
+            self._enabled_mods_sorted(),
+            target_dir=Path(self.game.deploy_target()),
+        )
+
     def deploy(self) -> deploy.DeployResult:
-        plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
+        plan = self._build_plan()
         target_dir = Path(self.game.deploy_target())
         return deploy.apply_plan(plan, target_dir, self.state_dir, self.game.deploy_method)
 
@@ -182,8 +197,7 @@ class ModManager:
         return deploy.undeploy_all(target_dir, self.state_dir)
 
     def preview_conflicts(self) -> dict[str, list[str]]:
-        plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
-        return plan.conflicts
+        return self._build_plan().conflicts
 
     def suggest_reorder(self) -> sorter.SortSuggestion:
         """Heuristic reorder suggestion for resolving file conflicts - see
@@ -194,7 +208,7 @@ class ModManager:
             all_mods = sorted(self._mods.values(), key=lambda m: m.priority)
         mods_dir = Path(self.game.mods_dir)
         enabled = [m for m in all_mods if m.enabled]
-        plan = deploy.build_plan(mods_dir, enabled)
+        plan = deploy.build_plan(mods_dir, enabled, target_dir=Path(self.game.deploy_target()))
         file_counts = {m.id: len(deploy.scan_mod_files(mods_dir / m.staging_subdir)) for m in enabled}
         return sorter.suggest_order(all_mods, plan.conflicts, file_counts)
 
@@ -208,7 +222,7 @@ class ModManager:
         the same deploy plan used for real deployment) and merges them
         into the persisted plugin order, keeping existing order/enabled
         state and dropping plugins no longer provided by anything."""
-        plan = deploy.build_plan(Path(self.game.mods_dir), self._enabled_mods_sorted())
+        plan = self._build_plan()
         detected = plugins_module.detect_plugins(plan.links)
         current = plugins_module.load_plugins(self.state_dir)
         updated = plugins_module.sync_plugins(current, detected)

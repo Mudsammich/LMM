@@ -313,6 +313,21 @@ def test_out_of_order_installs_preserve_intended_priority(tmp_path, game):
     assert [m.id for m in manager.list_mods()] == [mod_a.id, mod_b.id]
 
 
+def test_install_flattens_a_data_wrapped_archive(tmp_path, game):
+    """A mod packaged as Data/... must land as Textures/... in staging, or
+    every file deploys one level too deep for the game to find."""
+    archive_path = tmp_path / "wrapped.zip"
+    _make_zip(archive_path, {"Data/Textures/thing.dds": "x", "Data/mod.esp": "y"})
+
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "Wrapped Mod")
+
+    staging = tmp_path / "mods_staging" / mod.staging_subdir
+    assert (staging / "Textures" / "thing.dds").is_file()
+    assert (staging / "mod.esp").is_file()
+    assert not (staging / "Data").exists()
+
+
 def test_suggest_reorder_moves_patch_after_the_mod_it_patches(tmp_path, game):
     big_archive = tmp_path / "big.zip"
     _make_zip(big_archive, {f"file{i}.esp": "x" for i in range(20)})

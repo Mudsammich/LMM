@@ -36,27 +36,104 @@ class DeployResult:
     conflicts: dict[str, list[str]]
 
 
+# Installer metadata, not game content - never deployed. Kept in staging
+# though, since that's where the FOMOD installer reads it from.
+_NON_CONTENT_TOP_LEVEL = {"fomod"}
+
+
 def scan_mod_files(mod_root: Path) -> list[Path]:
     """All regular files under mod_root, as paths relative to mod_root."""
     if not mod_root.is_dir():
         return []
-    return [
-        p.relative_to(mod_root)
-        for p in mod_root.rglob("*")
-        if p.is_file() or p.is_symlink()
-    ]
+    found = []
+    for p in mod_root.rglob("*"):
+        if not (p.is_file() or p.is_symlink()):
+            continue
+        rel = p.relative_to(mod_root)
+        if rel.parts and rel.parts[0].lower() in _NON_CONTENT_TOP_LEVEL:
+            continue
+        found.append(rel)
+    return found
 
 
-def build_plan(mods_dir: Path, ordered_mods: list[InstalledMod]) -> DeployPlan:
+class CaseRegistry:
+    """Picks one canonical spelling per case-insensitively-equal path, so
+    mods that disagree about capitalisation merge into a single folder
+    instead of landing as siblings.
+
+    Windows and NTFS are case-insensitive, so mod authors capitalise
+    however they like and the game never notices. On Linux those are
+    genuinely different directories, which is why an unmerged deploy leaves
+    ``Textures`` sitting next to ``textures`` (and ``Meshes``/``meshes``,
+    ``Scripts``/``SCRIPTS``) in the game's Data folder, with the game
+    reliably finding only one of them.
+
+    First spelling registered wins, so seeding from the game's own Data
+    directory before the mods makes LMM adopt the *game's* capitalisation
+    rather than whichever mod happened to deploy first.
+    """
+
+    def __init__(self) -> None:
+        # case-folded relative path -> canonical spelling of its last part
+        self._canonical: dict[str, str] = {}
+
+    def seed_from_dir(self, root: Path) -> None:
+        """Registers the directory names already present under ``root``.
+        Directories only - files are the things mods replace, and walking
+        every file in a modded Data folder would be needlessly slow."""
+        if not root.is_dir():
+            return
+        for dirpath, dirnames, _files in os.walk(root, followlinks=False):
+            base = Path(dirpath).relative_to(root)
+            for name in dirnames:
+                self.canonical(base / name)
+
+    def canonical(self, rel_path: Path) -> str:
+        """The canonical spelling of ``rel_path``, registering any part not
+        seen before. Two paths differing only in case always come back
+        identical, which is what makes them merge."""
+        out: list[str] = []
+        folded: list[str] = []
+        for part in rel_path.parts:
+            folded.append(part.lower())
+            key = "/".join(folded)
+            existing = self._canonical.get(key)
+            if existing is None:
+                self._canonical[key] = part
+                out.append(part)
+            else:
+                out.append(existing)
+        return "/".join(out)
+
+
+def build_plan(
+    mods_dir: Path,
+    ordered_mods: list[InstalledMod],
+    target_dir: Path | None = None,
+) -> DeployPlan:
     """``ordered_mods`` must already be filtered to enabled mods and sorted
-    by ascending priority (last one wins conflicts)."""
+    by ascending priority (last one wins conflicts).
+
+    ``target_dir`` is the game's real deploy directory. Passing it lets
+    case-merging adopt the game's own folder capitalisation; it's only
+    read from, never written to, so callers that just want a preview can
+    pass it safely.
+    """
     plan = DeployPlan()
     providers: dict[str, list[str]] = {}
+
+    registry = CaseRegistry()
+    if target_dir is not None:
+        registry.seed_from_dir(Path(target_dir))
 
     for mod in ordered_mods:
         mod_root = mods_dir / mod.staging_subdir
         for rel_path in scan_mod_files(mod_root):
-            key = rel_path.as_posix()
+            # The canonical path doubles as the merge key: paths differing
+            # only in case canonicalise to the same string, so they land on
+            # one link and register as a conflict, exactly as they would
+            # have on Windows.
+            key = registry.canonical(rel_path)
             plan.links[key] = mod_root / rel_path
             providers.setdefault(key, []).append(mod.id)
 
