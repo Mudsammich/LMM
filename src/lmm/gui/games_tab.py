@@ -179,17 +179,31 @@ class GamesTab(QWidget):
                 "'Deploys to' column) and that its version matches the game's."
             )
         else:
-            lines.append("Newest first - the crash log names what actually crashed:")
+            if not diagnostics.crash_logger_present(logs):
+                lines += [
+                    "NO CRASH LOGGER DETECTED.",
+                    "",
+                    "The script extender is running, but nothing here writes a crash",
+                    "report - so a crash leaves no record of what caused it. Install a",
+                    "crash logger (Buffout 4 for Fallout 4, Crash Logger for Skyrim),",
+                    "make sure it deploys to the game root, and reproduce the crash;",
+                    "it will then name the module that actually faulted.",
+                    "",
+                ]
+            lines.append("Newest first:")
             lines.append("")
             for log in logs:
                 stamp = datetime.fromtimestamp(log.modified).strftime("%Y-%m-%d %H:%M")
-                lines.append(f"  {stamp}  {log.size:>9,} B  {log.path.name}")
+                lines.append(f"  [{log.category:<8}] {stamp}  {log.size:>9,} B  {log.name}")
                 lines.append(f"      {log.path}")
 
-        if logs:
-            newest = logs[0]
-            lines += ["", "=" * 60, f"NEWEST LOG: {newest.path.name}", "=" * 60, ""]
-            lines.append(diagnostics.read_log_tail(newest.path))
+        primary = diagnostics.pick_primary_log(logs)
+        if primary is not None:
+            # Chosen by how diagnostic it is, not by timestamp: every plugin
+            # rewrites its log each launch, so the newest file is usually
+            # just whichever one happened to finish last.
+            lines += ["", "=" * 60, f"MOST USEFUL LOG: {primary.name}", "=" * 60, ""]
+            lines.append(diagnostics.read_log_tail(primary.path))
 
         dialog = TextReportDialog(f"Diagnose - {game.name}", "\n".join(lines), parent=self)
         dialog.exec()

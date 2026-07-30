@@ -160,11 +160,78 @@ def enable_archive_invalidation(prefix_path: str | Path, game_folder: str) -> Pa
 # -- log discovery -----------------------------------------------------
 
 
+# Log categories, most diagnostic first. A crash log names the module that
+# actually faulted; the script extender's own log says which plugins loaded
+# and which failed. Everything else is a plugin chattering about itself -
+# useful occasionally, but never the thing to read first.
+CATEGORY_CRASH = "crash"
+CATEGORY_EXTENDER = "extender"
+CATEGORY_LOADER = "loader"
+CATEGORY_PLUGIN = "plugin"
+
+_CATEGORY_ORDER = (CATEGORY_CRASH, CATEGORY_EXTENDER, CATEGORY_LOADER, CATEGORY_PLUGIN)
+
+# Script extenders across the Bethesda titles.
+_EXTENDER_LOG_NAMES = {
+    "f4se.log", "f4sevr.log", "skse.log", "skse64.log", "sksevr.log",
+    "nvse.log", "obse.log", "fose.log",
+}
+# The crash loggers worth having installed. Their mere presence in this
+# folder means a crash *will* produce a report next time.
+_CRASH_LOGGER_LOG_NAMES = {
+    "buffout4.log", "crashlogger.log", "crashloggerSSE.log".lower(),
+    "netscriptframework.log", ".net script framework.log",
+}
+
+
+def classify_log(name: str) -> str:
+    lowered = name.lower()
+    if lowered.startswith("crash-") or lowered.startswith("crash_") or "crashlog-" in lowered:
+        return CATEGORY_CRASH
+    if lowered in _EXTENDER_LOG_NAMES:
+        return CATEGORY_EXTENDER
+    if "_loader" in lowered:
+        return CATEGORY_LOADER
+    return CATEGORY_PLUGIN
+
+
 @dataclass
 class LogFile:
     path: Path
     modified: float
     size: int
+    category: str = CATEGORY_PLUGIN
+
+    @property
+    def name(self) -> str:
+        return self.path.name
+
+
+def pick_primary_log(logs: list[LogFile]) -> LogFile | None:
+    """The log worth reading first.
+
+    Deliberately *not* simply the newest: every plugin rewrites its log on
+    each launch, so "newest" is a coin toss between a crash report and some
+    plugin's routine startup chatter. Ranked by category instead, newest
+    within a category.
+    """
+    for category in _CATEGORY_ORDER:
+        candidates = [log for log in logs if log.category == category]
+        if candidates:
+            return max(candidates, key=lambda log: log.modified)
+    return None
+
+
+def crash_logger_present(logs: list[LogFile]) -> bool:
+    """Whether a crash logger is installed and running. Without one, a
+    crash leaves nothing behind to diagnose - which is itself the finding
+    when a game is crashing and no report ever appears."""
+    for log in logs:
+        if log.category == CATEGORY_CRASH:
+            return True
+        if log.name.lower() in _CRASH_LOGGER_LOG_NAMES:
+            return True
+    return False
 
 
 def find_game_logs(
@@ -191,7 +258,14 @@ def find_game_logs(
             stat = candidate.stat()
         except OSError:
             continue
-        found.append(LogFile(path=candidate, modified=stat.st_mtime, size=stat.st_size))
+        found.append(
+            LogFile(
+                path=candidate,
+                modified=stat.st_mtime,
+                size=stat.st_size,
+                category=classify_log(candidate.name),
+            )
+        )
 
     found.sort(key=lambda f: f.modified, reverse=True)
     return found[:limit]

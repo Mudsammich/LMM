@@ -151,3 +151,61 @@ def test_ini_lands_in_the_prefixs_existing_documents_folder(tmp_path):
 
     assert "/Documents/My Games/Fallout4/" in str(written)
     assert "My Documents" not in str(written)
+
+
+# -- choosing which log to read -----------------------------------------------------
+
+
+def _logs(*specs):
+    """(name, minutes_ago) -> LogFile list, mirroring find_game_logs output."""
+    return [
+        diagnostics.LogFile(
+            path=Path("/p") / name,
+            modified=10_000 - minutes,
+            size=1,
+            category=diagnostics.classify_log(name),
+        )
+        for name, minutes in specs
+    ]
+
+
+def test_classify_log():
+    assert diagnostics.classify_log("crash-2026-07-30-18-42-11.log") == diagnostics.CATEGORY_CRASH
+    assert diagnostics.classify_log("f4se.log") == diagnostics.CATEGORY_EXTENDER
+    assert diagnostics.classify_log("f4se_loader.log") == diagnostics.CATEGORY_LOADER
+    assert diagnostics.classify_log("XDI.log") == diagnostics.CATEGORY_PLUGIN
+
+
+def test_primary_log_prefers_a_crash_report_over_a_newer_plugin_log():
+    """The exact case seen in the wild: XDI.log was newest, so a routine
+    sigscan dump got surfaced instead of the log that explains anything."""
+    logs = _logs(("XDI.log", 0), ("crash-2026-07-30.log", 30), ("f4se.log", 5))
+    assert diagnostics.pick_primary_log(logs).name == "crash-2026-07-30.log"
+
+
+def test_primary_log_falls_back_to_the_extender_log():
+    logs = _logs(("XDI.log", 0), ("MCM.log", 1), ("f4se.log", 20))
+    assert diagnostics.pick_primary_log(logs).name == "f4se.log"
+
+
+def test_primary_log_picks_the_newest_within_a_category():
+    logs = _logs(("crash-old.log", 100), ("crash-new.log", 1))
+    assert diagnostics.pick_primary_log(logs).name == "crash-new.log"
+
+
+def test_primary_log_of_nothing_is_none():
+    assert diagnostics.pick_primary_log([]) is None
+
+
+def test_crash_logger_absent_when_only_plugin_logs_exist():
+    logs = _logs(("XDI.log", 0), ("f4se.log", 1), ("MCM.log", 2), ("LL_fourPlay.log", 3))
+    assert not diagnostics.crash_logger_present(logs)
+
+
+def test_crash_logger_present_from_its_own_log_before_any_crash():
+    logs = _logs(("f4se.log", 1), ("Buffout4.log", 2))
+    assert diagnostics.crash_logger_present(logs)
+
+
+def test_crash_logger_present_from_an_actual_crash_report():
+    assert diagnostics.crash_logger_present(_logs(("crash-2026-07-30.log", 1)))
