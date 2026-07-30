@@ -187,6 +187,13 @@ class CollectionsTab(QWidget):
             if reply != QMessageBox.Yes:
                 return
 
+        # Downloads run concurrently, so they finish out of order - assign
+        # each mod its intended priority up front (collection order,
+        # appended after whatever's already installed) rather than letting
+        # install order end up as whichever download happened to land first.
+        manager = self.ctx.mod_manager(game_id)
+        base_priority = max((m.priority for m in manager.list_mods()), default=-1) + 1
+
         queued = 0
         failures: list[str] = []
         rate_limited = False
@@ -200,6 +207,7 @@ class CollectionsTab(QWidget):
                     mod.file_id,
                     mod.name,
                     game_id=game_id,
+                    priority_hint=base_priority + i - 1,
                 )
             except NexusRateLimitError:
                 rate_limited = True

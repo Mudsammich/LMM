@@ -281,6 +281,38 @@ def test_import_plugins_from_txt_resyncs_state(tmp_path, game):
     assert [p.name for p in manager2.list_plugins()] == ["FromLoot.esm", "Inactive.esp"]
 
 
+def test_install_with_explicit_priority_is_used_as_is(tmp_path, game):
+    archive_path = tmp_path / "mod.zip"
+    _make_zip(archive_path, {"file.txt": "hi"})
+
+    manager = ModManager(game)
+    mod = manager.install_from_archive(archive_path, "Late Mod", priority=7)
+
+    assert mod.priority == 7
+    # Next unhinted install still appends after the *actual* current max,
+    # not after the hint - so it doesn't collide with earlier real mods.
+    mod2 = manager.install_from_archive(archive_path, "Next Mod")
+    assert mod2.priority == 8
+
+
+def test_out_of_order_installs_preserve_intended_priority(tmp_path, game):
+    """Simulates a collection where downloads (and so installs) complete in
+    a different order than the collection's authored order - install_from_archive's
+    priority argument must make the final list_mods() order match the
+    intended order, not the completion order."""
+    archive_a = tmp_path / "a.zip"
+    archive_b = tmp_path / "b.zip"
+    _make_zip(archive_a, {"a.esp": "x"})
+    _make_zip(archive_b, {"b.esp": "x"})
+
+    manager = ModManager(game)
+    # "B" was authored second (priority 1) but its download finishes first.
+    mod_b = manager.install_from_archive(archive_b, "Mod B", priority=1)
+    mod_a = manager.install_from_archive(archive_a, "Mod A", priority=0)
+
+    assert [m.id for m in manager.list_mods()] == [mod_a.id, mod_b.id]
+
+
 def test_concurrent_installs_do_not_corrupt_state(tmp_path, game):
     """Regression guard for backgrounding installs off the GUI thread:
     many archives installing in parallel, with GUI-thread-style

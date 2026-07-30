@@ -78,7 +78,13 @@ class ModManager:
         archive_path: str | Path,
         display_name: str,
         source: ModSource | None = None,
+        priority: int | None = None,
     ) -> InstalledMod:
+        """``priority``, if given, is used as-is instead of appending at
+        the end of the current list - lets a caller installing many mods
+        at once (e.g. a whole Collection, downloaded concurrently and so
+        completing out of order) preserve a specific intended order rather
+        than whichever order downloads happened to finish in."""
         archive_path = Path(archive_path)
         if not archive.is_supported(archive_path):
             raise ModManagerError(f"Unsupported archive format: {archive_path.suffix}")
@@ -102,7 +108,10 @@ class ModManager:
 
         mod_id = staging_subdir
         with self._lock:
-            next_priority = max((m.priority for m in self._mods.values()), default=-1) + 1
+            if priority is not None:
+                next_priority = priority
+            else:
+                next_priority = max((m.priority for m in self._mods.values()), default=-1) + 1
             mod = InstalledMod(
                 id=mod_id,
                 name=display_name,

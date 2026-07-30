@@ -48,6 +48,7 @@ class DownloadsTab(QWidget):
         self.ctx = ctx
         self._rows: dict[str, int] = {}
         self._pending_install: dict[str, str] = {}  # task_id -> game_id
+        self._priority_hints: dict[str, int] = {}  # task_id -> intended mod priority (e.g. collection order)
 
         self.bridge = _DownloadBridge()
         self.bridge.progress.connect(self._on_progress)
@@ -147,11 +148,23 @@ class DownloadsTab(QWidget):
         self._queue_download(task_id, name, url, paths.download_cache_dir())
 
     def queue_nexus_file(
-        self, domain: str, mod_id: int, file_id: int, display_name: str, game_id: str | None = None
+        self,
+        domain: str,
+        mod_id: int,
+        file_id: int,
+        display_name: str,
+        game_id: str | None = None,
+        priority_hint: int | None = None,
     ) -> str | None:
         """Resolves and queues a specific Nexus mod file directly (used by
         the Collections tab, where there's no nxm key/expires pair - this
         only works for premium API keys).
+
+        ``priority_hint``, if given, is used as the mod's priority once it
+        installs instead of appending at the end of the list - lets a
+        caller queueing a whole collection preserve its authored order in
+        the resulting load order, even though downloads complete out of
+        order (they run concurrently).
 
         Returns an error message on failure instead of showing a dialog
         itself, so a caller queueing many files in a loop (a whole
@@ -172,7 +185,13 @@ class DownloadsTab(QWidget):
         task_id = str(uuid.uuid4())
         source = ModSource(kind="nexus", mod_id=mod_id, file_id=file_id)
         self._queue_download(
-            task_id, display_name, mirrors[0]["URI"], paths.download_cache_dir(), source=source, game_id=game_id
+            task_id,
+            display_name,
+            mirrors[0]["URI"],
+            paths.download_cache_dir(),
+            source=source,
+            game_id=game_id,
+            priority_hint=priority_hint,
         )
         return None
 
@@ -186,6 +205,7 @@ class DownloadsTab(QWidget):
         dest_dir: Path,
         source: ModSource | None = None,
         game_id: str | None = None,
+        priority_hint: int | None = None,
     ) -> None:
         dest_path = dest_dir / (Path(url.split("?")[0]).name or f"{task_id}.download")
         row = self.table.rowCount()
@@ -198,6 +218,8 @@ class DownloadsTab(QWidget):
         self._rows[task_id] = row
         if game_id:
             self._pending_install[task_id] = game_id
+        if priority_hint is not None:
+            self._priority_hints[task_id] = priority_hint
 
         self.ctx.download_manager.submit(
             task_id,
@@ -234,13 +256,14 @@ class DownloadsTab(QWidget):
         if row is not None:
             self.table.item(row, 2).setText("installing")
         manager = self.ctx.mod_manager(game_id)
+        priority_hint = self._priority_hints.pop(task_id, None)
 
         def _install_job() -> None:
             # Runs on lmm-install's single background thread - archive
             # extraction is slow, and 200 downloads finishing in a burst
             # would otherwise freeze the GUI running this synchronously.
             try:
-                manager.install_from_archive(dest_path, name)
+                manager.install_from_archive(dest_path, name, priority=priority_hint)
             except ModManagerError as exc:
                 self.bridge.install_done.emit(task_id, game_id, False, str(exc))
             else:
@@ -260,3 +283,4 @@ class DownloadsTab(QWidget):
         if row is not None:
             self.table.item(row, 2).setText(f"error: {message}")
         self._pending_install.pop(task_id, None)
+        self._priority_hints.pop(task_id, None)

@@ -132,6 +132,14 @@ If the GraphQL fetch ever breaks (it's an undocumented, best-effort query),
 running Vortex/the Nexus Mods App once to fetch the collection and copying
 `collection.json` out of its profile directory.
 
+Mods queued this way are installed in the **collection's authored order**
+(appended after whatever's already installed), regardless of which
+download happens to finish first - downloads run several at a time, so
+completion order alone would otherwise scramble the load order. This
+gives you a sane starting point, not a guarantee of zero conflicts; use
+**Show Conflicts** on the Mods tab afterwards to see what's left to
+resolve by hand.
+
 ### 5. Bethesda plugin load order (Skyrim SE, Fallout 4, etc.)
 
 Check **Manage Bethesda-style plugin load order** on the game (Add/Edit
