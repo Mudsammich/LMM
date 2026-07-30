@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 
 from .context import AppContext
 from .fomod_dialog import FomodDialog
+from .text_report_dialog import TextReportDialog
+from ..mods import conflicts as conflicts_module
 from ..models import (
     DEPLOY_ROOT_AUTO,
     DEPLOY_ROOT_DATA,
@@ -318,14 +320,22 @@ class ModsTab(QWidget):
         if not game_id:
             return
         manager = self.ctx.mod_manager(game_id)
-        conflicts = manager.preview_conflicts()
-        if not conflicts:
+        report, names, log_path = manager.conflict_report()
+        if not report.total_paths:
             QMessageBox.information(self, "Conflicts", "No file conflicts among enabled mods.")
             return
-        lines = []
-        for path, mod_ids in sorted(conflicts.items()):
-            lines.append(f"{path}\n    provided by: {', '.join(mod_ids)} (winner: {mod_ids[-1]})")
-        QMessageBox.information(self, "Conflicts", "\n\n".join(lines))
+        # Summarised by mod pair on screen; every individual file goes to the
+        # log, since a large modlist has far more of them than fit anywhere.
+        dialog = TextReportDialog(
+            "Conflicts",
+            conflicts_module.render_summary(report, names),
+            log_path=log_path,
+            parent=self,
+        )
+        dialog.exec()
+        self.status_label.setText(
+            f"{report.total_paths} conflicting file(s) - full report written to {log_path}"
+        )
 
     def _suggest_order(self) -> None:
         game_id = self._current_game_id()

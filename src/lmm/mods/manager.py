@@ -22,7 +22,15 @@ from ..models import (
     InstalledMod,
     ModSource,
 )
-from . import archive, deploy, fomod as fomod_module, fomod_install, plugins as plugins_module, sorter
+from . import (
+    archive,
+    conflicts as conflicts_module,
+    deploy,
+    fomod as fomod_module,
+    fomod_install,
+    plugins as plugins_module,
+    sorter,
+)
 
 # Called with the parsed installer script; returns the user's choices, or
 # None if they cancelled.
@@ -305,6 +313,17 @@ class ModManager:
 
     def preview_conflicts(self) -> dict[str, list[str]]:
         return self._build_plan().conflicts
+
+    def conflict_report(self) -> tuple[conflicts_module.ConflictReport, dict[str, str], Path]:
+        """The conflict summary, mod-id -> display-name map for rendering it,
+        and the path of the full log written alongside. The exhaustive
+        per-file listing goes to the log because a large modlist produces
+        thousands of them - far past what's readable on screen."""
+        report = conflicts_module.build_report(self.preview_conflicts())
+        with self._lock:
+            names = {m.id: m.name for m in self._mods.values()}
+        log_path = conflicts_module.write_log(self.state_dir, report, names, self.game.name)
+        return report, names, log_path
 
     def suggest_reorder(self) -> sorter.SortSuggestion:
         """Heuristic reorder suggestion for resolving file conflicts - see
