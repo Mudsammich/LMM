@@ -209,3 +209,78 @@ def test_crash_logger_present_from_its_own_log_before_any_crash():
 
 def test_crash_logger_present_from_an_actual_crash_report():
     assert diagnostics.crash_logger_present(_logs(("crash-2026-07-30.log", 1)))
+
+
+# -- reading the script extender log -----------------------------------------------------
+
+# Trimmed from a real f4se.log off a modded Fallout 4 install.
+F4SE_LOG = """F4SE runtime: initialize (version = 0.7.8 010B0DD0 01DD1FD1AD5C8CB3, os = 6.2 (9200))
+imagebase = 0000000140000000
+checking plugin BakaFramework.dll
+plugin BakaFramework.dll (00000001 BakaFramework 04010000) disabled, address library needs to be updated 0 (handle 0)
+plugin WeaponDebrisCrashFix.dll (00000001 WeaponDebrisCrashFix 01040000) disabled, address library needs to be updated 0 (handle 0)
+plugin SUP_F4SE.dll (00000000  00000000) no version data 0 (handle 0)
+plugin mcm.dll (00000001 F4MCM 0000000A) loaded correctly (handle 5)
+plugin XDI.dll (00000001 XDI 00000001) loaded correctly (handle 6)
+"""
+
+
+def test_decode_runtime_version_matches_known_builds():
+    # The version every Fallout 4 mod page quotes, as the format check.
+    assert diagnostics.decode_runtime_version("010A00A3") == "1.10.163"
+    assert diagnostics.decode_runtime_version("nonsense") == ""
+
+
+def test_summarise_extender_log_splits_loaded_from_failed():
+    summary = diagnostics.summarise_extender_log(F4SE_LOG)
+
+    assert summary.extender_version == "0.7.8"
+    assert summary.runtime_raw == "010B0DD0"
+    assert summary.total == 5
+    assert {p.file for p in summary.loaded} == {"mcm.dll", "XDI.dll"}
+    assert len(summary.failed) == 3
+
+
+def test_address_library_failures_are_singled_out():
+    """The line reads like any other, but it means the game version and the
+    mods disagree - which is the whole diagnosis."""
+    summary = diagnostics.summarise_extender_log(F4SE_LOG)
+
+    assert {p.file for p in summary.address_library_failures} == {
+        "BakaFramework.dll",
+        "WeaponDebrisCrashFix.dll",
+    }
+    # "no version data" is a different problem and must not be lumped in.
+    others = [p for p in summary.failed if not p.is_address_library_problem]
+    assert [p.file for p in others] == ["SUP_F4SE.dll"]
+
+
+def test_rendered_summary_explains_the_mismatch():
+    rendered = "\n".join(
+        diagnostics.render_extender_summary(diagnostics.summarise_extender_log(F4SE_LOG))
+    )
+
+    assert "2 of 5 plugin(s) loaded" in rendered
+    assert "Address Library doesn't match" in rendered
+    assert "BakaFramework.dll" in rendered
+    assert "SUP_F4SE.dll" in rendered
+
+
+def test_a_healthy_log_reports_no_problem():
+    healthy = (
+        "F4SE runtime: initialize (version = 0.6.23 010A00A3 x, os = 6.2 (9200))\n"
+        "plugin mcm.dll (00000001 F4MCM 0000000A) loaded correctly (handle 1)\n"
+    )
+    summary = diagnostics.summarise_extender_log(healthy)
+    rendered = "\n".join(diagnostics.render_extender_summary(summary))
+
+    assert summary.address_library_failures == []
+    assert "1 of 1 plugin(s) loaded" in rendered
+    assert "1.10.163" in rendered
+    assert "PROBLEM" not in rendered
+
+
+def test_summarising_an_unrelated_log_yields_nothing():
+    assert diagnostics.render_extender_summary(
+        diagnostics.summarise_extender_log("XDI v1.4.2\nSigscan elapsed: 234 ms.\n")
+    ) == []

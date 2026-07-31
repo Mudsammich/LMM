@@ -197,6 +197,19 @@ class GamesTab(QWidget):
                 lines.append(f"  [{log.category:<8}] {stamp}  {log.size:>9,} B  {log.name}")
                 lines.append(f"      {log.path}")
 
+        # Read the extender log rather than just printing it: its failures are
+        # scattered among dozens of successes, and the most common one - the
+        # Address Library not matching the game version - reads as an
+        # unremarkable line rather than the showstopper it is.
+        extender = next((l for l in logs if l.category == diagnostics.CATEGORY_EXTENDER), None)
+        if extender is not None:
+            summary = diagnostics.summarise_extender_log(
+                diagnostics.read_log_tail(extender.path, max_bytes=256 * 1024)
+            )
+            rendered = diagnostics.render_extender_summary(summary)
+            if rendered:
+                lines += ["", *rendered]
+
         primary = diagnostics.pick_primary_log(logs)
         if primary is not None:
             # Chosen by how diagnostic it is, not by timestamp: every plugin

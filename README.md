@@ -297,6 +297,13 @@ where they're easy to miss:
   `<Game>Custom.ini`, preserving whatever's already there. Note that having
   only `bInvalidateOlderFiles=1` is the usual half-applied case and does not
   work; `sResourceDataDirsFinal=` must be present and empty too.
+- **Script extender plugin failures.** Diagnose reads the extender's own
+  log rather than just printing it, and reports your game version, how many
+  plugins loaded, and which didn't. It singles out the most common failure -
+  plugins refusing to load because the Address Library doesn't match the
+  game's version, which happens when the game updates to a build the mods
+  weren't made for. Those lines look unremarkable in the raw log but mean
+  a large part of a modlist is silently inert.
 - **Script extender and crash logs.** Diagnose lists every log under
   `My Games/<game>` newest-first and inlines the newest one. If the game
   crashes, the crash log (Buffout 4 on Fallout 4, Crash Logger on Skyrim)

@@ -20,6 +20,7 @@ finds by accident.
 from __future__ import annotations
 
 import configparser
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -269,6 +270,139 @@ def find_game_logs(
 
     found.sort(key=lambda f: f.modified, reverse=True)
     return found[:limit]
+
+
+# "plugin Foo.dll (00000001 Foo 01000000) disabled, address library needs
+# to be updated 0 (handle 0)" - the trailing handle is noise.
+_PLUGIN_LINE = re.compile(
+    r"^plugin\s+(?P<file>\S+\.dll)\s*\((?P<meta>[^)]*)\)\s*(?P<status>.+?)"
+    r"(?:\s*\(handle\s+\d+\))?\s*$",
+    re.IGNORECASE,
+)
+# "F4SE runtime: initialize (version = 0.7.8 010B0DD0 01DD1FD1AD5C8CB3, os = ...)"
+_RUNTIME_LINE = re.compile(
+    r"runtime:\s*initialize\s*\(version\s*=\s*(?P<extender>[\d.]+)\s+(?P<runtime>[0-9A-Fa-f]{8})",
+    re.IGNORECASE,
+)
+
+_ADDRESS_LIBRARY_HINT = "address library"
+
+
+@dataclass
+class PluginStatus:
+    file: str
+    loaded: bool
+    status: str
+
+    @property
+    def is_address_library_problem(self) -> bool:
+        return _ADDRESS_LIBRARY_HINT in self.status.lower()
+
+
+@dataclass
+class ExtenderSummary:
+    extender_version: str = ""
+    runtime_raw: str = ""
+    runtime_version: str = ""
+    loaded: list[PluginStatus] = field(default_factory=list)
+    failed: list[PluginStatus] = field(default_factory=list)
+
+    @property
+    def address_library_failures(self) -> list[PluginStatus]:
+        return [p for p in self.failed if p.is_address_library_problem]
+
+    @property
+    def total(self) -> int:
+        return len(self.loaded) + len(self.failed)
+
+
+def decode_runtime_version(raw: str) -> str:
+    """Turns the script extender's packed runtime version into the dotted
+    form the mod pages use. ``010A00A3`` -> ``1.10.163``, which is the
+    number to compare against what a mod says it supports."""
+    try:
+        value = int(raw, 16)
+    except ValueError:
+        return ""
+    return f"{(value >> 24) & 0xFF}.{(value >> 16) & 0xFF}.{value & 0xFFFF}"
+
+
+def summarise_extender_log(text: str) -> ExtenderSummary:
+    """Reads a script extender log into which plugins loaded and which
+    didn't.
+
+    Worth doing rather than showing the raw log, because the failures are
+    scattered among the successes across dozens of lines, and the single
+    most common failure - a plugin refusing to load because the Address
+    Library doesn't match the game's version - looks like an unremarkable
+    line rather than the showstopper it is.
+    """
+    summary = ExtenderSummary()
+    for line in text.splitlines():
+        line = line.strip()
+        runtime_match = _RUNTIME_LINE.search(line)
+        if runtime_match:
+            summary.extender_version = runtime_match.group("extender")
+            summary.runtime_raw = runtime_match.group("runtime").upper()
+            summary.runtime_version = decode_runtime_version(summary.runtime_raw)
+            continue
+        plugin_match = _PLUGIN_LINE.match(line)
+        if not plugin_match:
+            continue
+        status = plugin_match.group("status").strip()
+        entry = PluginStatus(file=plugin_match.group("file"), loaded=False, status=status)
+        if status.lower().startswith("loaded correctly"):
+            entry.loaded = True
+            summary.loaded.append(entry)
+        else:
+            summary.failed.append(entry)
+    return summary
+
+
+def render_extender_summary(summary: ExtenderSummary) -> list[str]:
+    """Plain-language reading of an extender log, for the Diagnose report."""
+    if not summary.total and not summary.runtime_raw:
+        return []
+
+    lines = ["SCRIPT EXTENDER PLUGINS", "-" * 60]
+    if summary.runtime_version:
+        lines.append(
+            f"Game version {summary.runtime_version} (raw {summary.runtime_raw}), "
+            f"script extender {summary.extender_version}"
+        )
+    if not summary.total:
+        return lines + ["No plugin load results in the log."]
+
+    lines.append(f"{len(summary.loaded)} of {summary.total} plugin(s) loaded.")
+
+    address_failures = summary.address_library_failures
+    if address_failures:
+        lines += [
+            "",
+            f"PROBLEM - {len(address_failures)} plugin(s) refused to load because the",
+            "Address Library doesn't match the game's version. That happens when the",
+            "game updates to a version the mods weren't built for - the mods' .esp",
+            "files still load, but everything depending on these plugins doesn't,",
+            "which is a common cause of crashing at or just after the main menu.",
+            "",
+            "Fix it by making the three agree: the game's version, the script",
+            f"extender build for it, and an Address Library for {summary.runtime_version or 'that version'}.",
+            "If the modlist targets an older version, downgrading the game to it is",
+            "usually easier than finding updated builds of every plugin.",
+        ]
+
+    other_failures = [p for p in summary.failed if not p.is_address_library_problem]
+    if other_failures:
+        lines += ["", "Other plugins that didn't load:"]
+        for plugin in other_failures:
+            lines.append(f"  {plugin.file} - {plugin.status}")
+
+    if address_failures:
+        lines += ["", "Blocked by the Address Library mismatch:"]
+        for plugin in address_failures:
+            lines.append(f"  {plugin.file}")
+
+    return lines
 
 
 def read_log_tail(path: str | Path, max_bytes: int = 64 * 1024) -> str:
