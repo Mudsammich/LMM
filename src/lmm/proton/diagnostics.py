@@ -405,6 +405,105 @@ def render_extender_summary(summary: ExtenderSummary) -> list[str]:
     return lines
 
 
+# -- address library -----------------------------------------------------
+
+# "version-1-10-163-0.bin" (Fallout 4), "versionlib-1-5-97-0.bin" (Skyrim SE).
+_ADDRESS_LIBRARY_FILE = re.compile(
+    r"^version(?:lib)?-(\d+)-(\d+)-(\d+)-\d+\.bin$", re.IGNORECASE
+)
+
+
+@dataclass
+class AddressLibraryStatus:
+    plugins_dir: Path | None = None
+    installed_versions: list[str] = field(default_factory=list)
+    runtime_version: str = ""
+    detail: str = ""
+
+    @property
+    def matches(self) -> bool:
+        return bool(self.runtime_version) and self.runtime_version in self.installed_versions
+
+
+def _find_subdir(parent: Path, name: str) -> Path | None:
+    """Case-insensitive child lookup - mods disagree about ``F4SE`` vs
+    ``f4se`` and on Linux that's a different directory."""
+    if not parent.is_dir():
+        return None
+    exact = parent / name
+    if exact.is_dir():
+        return exact
+    lowered = name.lower()
+    try:
+        for child in parent.iterdir():
+            if child.is_dir() and child.name.lower() == lowered:
+                return child
+    except OSError:
+        return None
+    return None
+
+
+def check_address_library(
+    game_data_dir: str | Path, runtime_version: str = ""
+) -> AddressLibraryStatus:
+    """Which Address Library versions are actually installed, and whether one
+    of them matches the running game.
+
+    The Address Library is the thing every "address library needs to be
+    updated" message is about, but it never shows up in a script extender's
+    plugin list - it isn't a plugin, it's a set of ``version-*.bin`` offset
+    databases sitting beside them. So the extender can only say "wrong
+    version", never *which* version you have. Reading the filenames answers
+    that directly.
+    """
+    extender_dir = None
+    data_dir = Path(game_data_dir)
+    for name in ("F4SE", "SKSE", "NVSE", "OBSE"):
+        extender_dir = _find_subdir(data_dir, name)
+        if extender_dir is not None:
+            break
+    plugins_dir = _find_subdir(extender_dir, "Plugins") if extender_dir else None
+
+    status = AddressLibraryStatus(plugins_dir=plugins_dir, runtime_version=runtime_version)
+    if plugins_dir is None:
+        status.detail = (
+            "No script extender Plugins folder found in the game's data directory, "
+            "so no Address Library is installed there."
+        )
+        return status
+
+    versions: list[str] = []
+    try:
+        for entry in plugins_dir.iterdir():
+            match = _ADDRESS_LIBRARY_FILE.match(entry.name)
+            if match:
+                versions.append(".".join(match.groups()))
+    except OSError:
+        pass
+    status.installed_versions = sorted(set(versions))
+
+    if not status.installed_versions:
+        status.detail = (
+            "No Address Library found. Plugins that need it can't load without it - "
+            "install the Address Library build matching your game version."
+        )
+    elif not runtime_version:
+        status.detail = f"Address Library installed for: {', '.join(status.installed_versions)}."
+    elif status.matches:
+        status.detail = (
+            f"Address Library matches the running game ({runtime_version})."
+        )
+    else:
+        status.detail = (
+            f"MISMATCH - Address Library installed for "
+            f"{', '.join(status.installed_versions)}, but the game is {runtime_version}. "
+            "That is exactly what the plugin failures above are complaining about: "
+            "either install the Address Library for this game version, or put the "
+            "game back on a version the modlist supports."
+        )
+    return status
+
+
 def read_log_tail(path: str | Path, max_bytes: int = 64 * 1024) -> str:
     """The end of a log file - crash logs put the useful part (the faulting
     module and the call stack) near the top, but extender logs grow, so a

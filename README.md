@@ -304,6 +304,11 @@ where they're easy to miss:
   game's version, which happens when the game updates to a build the mods
   weren't made for. Those lines look unremarkable in the raw log but mean
   a large part of a modlist is silently inert.
+- **Address Library version.** The "address library needs to be updated"
+  failure above is about a set of `version-*.bin` offset databases, not a
+  plugin - so a script extender can only ever say *wrong version*, never
+  which one you have. Diagnose reads those filenames and reports the
+  mismatch concretely ("installed for 1.10.163, but the game is 1.11.3536").
 - **Script extender and crash logs.** Diagnose lists every log under
   `My Games/<game>` newest-first and inlines the newest one. If the game
   crashes, the crash log (Buffout 4 on Fallout 4, Crash Logger on Skyrim)

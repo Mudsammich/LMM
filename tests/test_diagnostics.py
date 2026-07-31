@@ -284,3 +284,85 @@ def test_summarising_an_unrelated_log_yields_nothing():
     assert diagnostics.render_extender_summary(
         diagnostics.summarise_extender_log("XDI v1.4.2\nSigscan elapsed: 234 ms.\n")
     ) == []
+
+
+# -- address library -----------------------------------------------------
+
+
+def _plugins_dir(tmp_path, extender="F4SE"):
+    d = tmp_path / "Data" / extender / "Plugins"
+    d.mkdir(parents=True)
+    return d
+
+
+def test_address_library_mismatch_names_both_versions(tmp_path):
+    """The extender only ever says "needs to be updated" - this says which
+    version is actually installed, which is the missing half."""
+    plugins = _plugins_dir(tmp_path)
+    (plugins / "version-1-10-163-0.bin").write_bytes(b"")
+    (plugins / "SomePlugin.dll").write_bytes(b"")
+
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.11.3536")
+
+    assert status.installed_versions == ["1.10.163"]
+    assert not status.matches
+    assert "MISMATCH" in status.detail
+    assert "1.10.163" in status.detail and "1.11.3536" in status.detail
+
+
+def test_address_library_match_is_reported_clean(tmp_path):
+    plugins = _plugins_dir(tmp_path)
+    (plugins / "version-1-10-163-0.bin").write_bytes(b"")
+
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.10.163")
+
+    assert status.matches
+    assert "matches" in status.detail
+
+
+def test_several_address_libraries_installed_are_all_listed(tmp_path):
+    plugins = _plugins_dir(tmp_path)
+    (plugins / "version-1-10-163-0.bin").write_bytes(b"")
+    (plugins / "version-1-10-984-0.bin").write_bytes(b"")
+
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.10.984")
+
+    assert status.installed_versions == ["1.10.163", "1.10.984"]
+    assert status.matches  # one of them is right, which is what matters
+
+
+def test_skyrim_versionlib_naming_is_recognised(tmp_path):
+    plugins = _plugins_dir(tmp_path, extender="SKSE")
+    (plugins / "versionlib-1-5-97-0.bin").write_bytes(b"")
+
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.5.97")
+
+    assert status.installed_versions == ["1.5.97"]
+    assert status.matches
+
+
+def test_missing_address_library_is_reported(tmp_path):
+    _plugins_dir(tmp_path)
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.10.163")
+
+    assert status.installed_versions == []
+    assert "No Address Library found" in status.detail
+
+
+def test_lowercase_extender_folder_is_found(tmp_path):
+    """Mods disagree about F4SE vs f4se, and on Linux that matters."""
+    plugins = tmp_path / "Data" / "f4se" / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "version-1-10-163-0.bin").write_bytes(b"")
+
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.10.163")
+
+    assert status.matches
+
+
+def test_no_extender_folder_at_all(tmp_path):
+    (tmp_path / "Data").mkdir()
+    status = diagnostics.check_address_library(tmp_path / "Data", "1.10.163")
+
+    assert status.plugins_dir is None
+    assert "No script extender Plugins folder" in status.detail

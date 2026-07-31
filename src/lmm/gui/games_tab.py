@@ -209,6 +209,15 @@ class GamesTab(QWidget):
             rendered = diagnostics.render_extender_summary(summary)
             if rendered:
                 lines += ["", *rendered]
+            # The extender can only report "wrong version", never which one
+            # is installed - the Address Library isn't a plugin, so it never
+            # appears in its scan. Reading the .bin filenames names it.
+            address = diagnostics.check_address_library(
+                game.deploy_target(), summary.runtime_version
+            )
+            lines += ["", "ADDRESS LIBRARY", "-" * 60, address.detail]
+            if address.plugins_dir:
+                lines.append(f"looked in: {address.plugins_dir}")
 
         primary = diagnostics.pick_primary_log(logs)
         if primary is not None:
