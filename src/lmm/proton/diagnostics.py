@@ -316,15 +316,46 @@ class ExtenderSummary:
         return len(self.loaded) + len(self.failed)
 
 
-def decode_runtime_version(raw: str) -> str:
+def _packs_subminor(extender_version: str) -> bool:
+    """Whether this script extender build packs a sub-minor into the low
+    nibble of the runtime version.
+
+    F4SE changed encoding at 0.7: the older builds put the game's build
+    number straight into the low 16 bits (``010A00A3`` = 1.10.163), while
+    0.7+ shifts it up four bits to make room for a sub-minor
+    (``010B0DD0`` = 1.11.221.0, *not* 1.11.3536). Decoding a 0.7-era value
+    with the old rule yields a version number that doesn't exist, which is
+    worse than useless when it's the number you go searching Nexus with.
+    """
+    try:
+        major_text, _, rest = extender_version.partition(".")
+        minor_text = rest.partition(".")[0]
+        major, minor = int(major_text), int(minor_text)
+    except (TypeError, ValueError):
+        return False
+    return (major, minor) >= (0, 7)
+
+
+def decode_runtime_version(raw: str, extender_version: str = "") -> str:
     """Turns the script extender's packed runtime version into the dotted
-    form the mod pages use. ``010A00A3`` -> ``1.10.163``, which is the
-    number to compare against what a mod says it supports."""
+    form mod pages quote - the number to compare against what a mod says it
+    supports.
+
+    ``extender_version`` selects the encoding (see ``_packs_subminor``); with
+    it unknown the older layout is assumed, since that's the one the format
+    is historically documented with.
+    """
     try:
         value = int(raw, 16)
-    except ValueError:
+    except (TypeError, ValueError):
         return ""
-    return f"{(value >> 24) & 0xFF}.{(value >> 16) & 0xFF}.{value & 0xFFFF}"
+    major = (value >> 24) & 0xFF
+    minor = (value >> 16) & 0xFF
+    low = value & 0xFFFF
+    if _packs_subminor(extender_version):
+        build, sub = low >> 4, low & 0xF
+        return f"{major}.{minor}.{build}" + (f".{sub}" if sub else "")
+    return f"{major}.{minor}.{low}"
 
 
 def summarise_extender_log(text: str) -> ExtenderSummary:
@@ -344,7 +375,9 @@ def summarise_extender_log(text: str) -> ExtenderSummary:
         if runtime_match:
             summary.extender_version = runtime_match.group("extender")
             summary.runtime_raw = runtime_match.group("runtime").upper()
-            summary.runtime_version = decode_runtime_version(summary.runtime_raw)
+            summary.runtime_version = decode_runtime_version(
+                summary.runtime_raw, summary.extender_version
+            )
             continue
         plugin_match = _PLUGIN_LINE.match(line)
         if not plugin_match:

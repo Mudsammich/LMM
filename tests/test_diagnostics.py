@@ -227,8 +227,25 @@ plugin XDI.dll (00000001 XDI 00000001) loaded correctly (handle 6)
 
 def test_decode_runtime_version_matches_known_builds():
     # The version every Fallout 4 mod page quotes, as the format check.
-    assert diagnostics.decode_runtime_version("010A00A3") == "1.10.163"
+    assert diagnostics.decode_runtime_version("010A00A3", "0.6.23") == "1.10.163"
     assert diagnostics.decode_runtime_version("nonsense") == ""
+
+
+def test_decode_runtime_version_handles_the_0_7_encoding():
+    """F4SE 0.7 shifted the build up four bits to fit a sub-minor. Decoded
+    with the old rule this reads 1.11.3536 - a version that doesn't exist,
+    and exactly the wrong thing to go searching Nexus with."""
+    assert diagnostics.decode_runtime_version("010B0DD0", "0.7.8") == "1.11.221"
+    assert diagnostics.decode_runtime_version("010B0DD0", "0.6.23") == "1.11.3536"
+
+
+def test_decode_runtime_version_keeps_a_nonzero_subminor():
+    assert diagnostics.decode_runtime_version("010B0DD3", "0.7.8") == "1.11.221.3"
+
+
+def test_decode_runtime_version_without_an_extender_version():
+    """Falls back to the historically documented layout."""
+    assert diagnostics.decode_runtime_version("010A00A3") == "1.10.163"
 
 
 def test_summarise_extender_log_splits_loaded_from_failed():
@@ -236,6 +253,7 @@ def test_summarise_extender_log_splits_loaded_from_failed():
 
     assert summary.extender_version == "0.7.8"
     assert summary.runtime_raw == "010B0DD0"
+    assert summary.runtime_version == "1.11.221"
     assert summary.total == 5
     assert {p.file for p in summary.loaded} == {"mcm.dll", "XDI.dll"}
     assert len(summary.failed) == 3
