@@ -3,7 +3,7 @@ simple (de)serialisation - business logic belongs in the owning module.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -61,6 +61,14 @@ class ModSource:
     md5: str = ""
 
 
+# Where a mod's files belong. Most mods install into the game's data
+# folder, but script extenders, crash loggers and graphics injectors have
+# to sit next to the game executable instead - see deploy.detect_deploy_root.
+DEPLOY_ROOT_AUTO = "auto"
+DEPLOY_ROOT_DATA = "data"
+DEPLOY_ROOT_GAME = "game_root"
+
+
 @dataclass
 class InstalledMod:
     """A mod extracted into a game's staging directory."""
@@ -73,6 +81,8 @@ class InstalledMod:
     priority: int = 0  # load order; higher wins conflicts on deploy
     source: ModSource = field(default_factory=ModSource)
     notes: str = ""
+    # "auto" detects from the mod's own layout; "data"/"game_root" force it.
+    deploy_root: str = DEPLOY_ROOT_AUTO
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -83,7 +93,11 @@ class InstalledMod:
         d = dict(d)
         src = d.get("source") or {}
         d["source"] = ModSource(**src)
-        return cls(**d)
+        # Tolerate mods.json files written before a field existed, and
+        # ignore any we no longer know about, so an upgrade never wipes a
+        # user's mod list.
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in d.items() if k in known})
 
 
 @dataclass

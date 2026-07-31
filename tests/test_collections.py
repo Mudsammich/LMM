@@ -175,3 +175,147 @@ def test_fetch_revision_manifest_handles_empty_response():
     client = _StubGraphQLClient(response={})
     with pytest.raises(CollectionAPIUnavailable):
         fetch_revision_manifest(client, "fallout4", "5atq9t")
+
+
+# -- off-site (direct / GitHub) sources -----------------------------------------------------
+
+
+class _RoutingGraphQLClient:
+    """Answers the mod-list query and the external-resources query
+    separately, and can reject the wider external field sets so the
+    progressive fallback is exercised. ``accept`` is the substring that must
+    appear in an external query for this stub to answer it."""
+
+    MOD_LIST = {
+        "collectionRevision": {
+            "collection": {"name": "List", "user": {"name": "author"}},
+            "modFiles": [
+                {
+                    "optional": False,
+                    "file": {
+                        "modId": 1,
+                        "fileId": 2,
+                        "name": "A Nexus Mod",
+                        "version": "1.0",
+                        "game": {"domainName": "fallout4"},
+                    },
+                }
+            ],
+        }
+    }
+
+    def __init__(self, externals, accept="resourceType"):
+        self._externals = externals
+        self._accept = accept
+        self.external_attempts = 0
+
+    def graphql(self, query, variables=None):
+        if "externalResources" not in query:
+            return self.MOD_LIST
+        self.external_attempts += 1
+        if self._accept not in query:
+            raise NexusAPIError("Cannot query field")
+        return {"collectionRevision": {"externalResources": self._externals}}
+
+
+def test_external_resources_are_appended_to_the_manifest():
+    client = _RoutingGraphQLClient(
+        [
+            {
+                "name": "xSE PluginPreloader",
+                "version": "0.2.5",
+                "optional": False,
+                "resourceUrl": "https://github.com/owner/repo/releases/download/v0.2.5/xSE.7z",
+                "resourceType": "direct",
+                "fileExpression": "xSE.7z",
+            }
+        ]
+    )
+
+    manifest = fetch_revision_manifest(client, "fallout4", "axerbq")
+
+    assert [m.name for m in manifest.mods] == ["A Nexus Mod", "xSE PluginPreloader"]
+    offsite = manifest.mods[1]
+    assert offsite.is_direct
+    assert not offsite.is_nexus
+    assert offsite.direct_url.endswith("xSE.7z")
+    assert offsite.suggested_filename == "xSE.7z"
+
+
+def test_external_resources_fall_back_to_a_narrower_field_set():
+    """The exact selection set is undocumented, so a server that rejects the
+    widest query must still yield results from a narrower one."""
+    client = _RoutingGraphQLClient(
+        [{"name": "Some Tool", "resourceUrl": "https://github.com/o/r/releases/download/v1/t.zip"}],
+        accept="name resourceUrl",
+    )
+
+    manifest = fetch_revision_manifest(client, "fallout4", "axerbq")
+
+    assert client.external_attempts > 1  # the wide sets were tried and refused
+    assert manifest.mods[1].is_direct
+
+
+def test_unknown_external_schema_never_breaks_the_mod_list():
+    client = _RoutingGraphQLClient([], accept="this-will-never-match")
+
+    manifest = fetch_revision_manifest(client, "fallout4", "axerbq")
+
+    assert [m.name for m in manifest.mods] == ["A Nexus Mod"]
+
+
+def test_browse_only_resources_are_not_treated_as_downloadable():
+    client = _RoutingGraphQLClient(
+        [
+            {
+                "name": "Manual Thing",
+                "resourceUrl": "https://example.com/a-page",
+                "resourceType": "browse",
+            },
+            {"name": "No URL At All", "resourceType": "direct"},
+        ]
+    )
+
+    manifest = fetch_revision_manifest(client, "fallout4", "axerbq")
+
+    for mod in manifest.mods[1:]:
+        assert not mod.is_direct
+        assert mod.is_browse_only
+
+
+def test_direct_source_from_collection_json():
+    manifest = parse_manifest(
+        {
+            "info": {"name": "L", "domainName": "fallout4"},
+            "mods": [
+                {
+                    "name": "Buffout Loader",
+                    "source": {
+                        "type": "direct",
+                        "url": "https://github.com/o/r/releases/download/v1/loader.zip",
+                        "logicalFilename": "loader.zip",
+                    },
+                }
+            ],
+        }
+    )
+
+    mod = manifest.mods[0]
+    assert mod.is_direct
+    assert mod.suggested_filename == "loader.zip"
+
+
+def test_suggested_filename_falls_back_to_the_url_tail():
+    manifest = parse_manifest(
+        {
+            "info": {"name": "L", "domainName": "fallout4"},
+            "mods": [
+                {"name": "A", "source": {"type": "direct", "url": "https://x.com/dl/thing-1.2.7z"}},
+                {"name": "B", "source": {"type": "direct", "url": "https://x.com/releases/latest"}},
+            ],
+        }
+    )
+
+    assert manifest.mods[0].suggested_filename == "thing-1.2.7z"
+    # No filename in the URL - better to save nothing than a version tag.
+    assert manifest.mods[1].suggested_filename == ""

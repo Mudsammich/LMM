@@ -94,3 +94,42 @@ def test_run_in_prefix_raises_without_steam_root(monkeypatch, fake_proton, fake_
     monkeypatch.setattr(proton_prefix, "find_steam_root", lambda: None)
     with pytest.raises(RuntimeError, match="Steam installation"):
         proton_prefix.run_in_prefix("game.exe", fake_prefix, fake_proton)
+
+
+def _make_local_appdata(fake_prefix, folder_names):
+    local = proton_prefix.app_data_local(fake_prefix)
+    for name in folder_names:
+        (local / name).mkdir(parents=True)
+    return local
+
+
+def test_find_local_appdata_candidates_excludes_system_folders(fake_prefix):
+    _make_local_appdata(fake_prefix, ["Fallout4", "Microsoft", "Temp", "NVIDIA"])
+    candidates = proton_prefix.find_local_appdata_candidates(fake_prefix)
+    assert [c.name for c in candidates] == ["Fallout4"]
+
+
+def test_find_local_appdata_candidates_empty_when_prefix_never_used(fake_prefix):
+    assert proton_prefix.find_local_appdata_candidates(fake_prefix) == []
+
+
+def test_guess_plugins_txt_path_matches_ignoring_case_and_spaces(fake_prefix):
+    _make_local_appdata(fake_prefix, ["Fallout4", "Microsoft"])
+    guess = proton_prefix.guess_plugins_txt_path(fake_prefix, "Fallout 4")
+    assert guess == proton_prefix.app_data_local(fake_prefix) / "Fallout4" / "Plugins.txt"
+
+
+def test_guess_plugins_txt_path_single_candidate_used_even_without_name_match(fake_prefix):
+    _make_local_appdata(fake_prefix, ["SomeOddFolderName", "Microsoft"])
+    guess = proton_prefix.guess_plugins_txt_path(fake_prefix, "Skyrim Special Edition")
+    assert guess == proton_prefix.app_data_local(fake_prefix) / "SomeOddFolderName" / "Plugins.txt"
+
+
+def test_guess_plugins_txt_path_ambiguous_returns_none(fake_prefix):
+    _make_local_appdata(fake_prefix, ["Fallout4", "SomeOtherGame"])
+    guess = proton_prefix.guess_plugins_txt_path(fake_prefix, "Skyrim Special Edition")
+    assert guess is None
+
+
+def test_guess_plugins_txt_path_no_candidates_returns_none(fake_prefix):
+    assert proton_prefix.guess_plugins_txt_path(fake_prefix, "Fallout 4") is None

@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QHeaderView,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -27,9 +26,27 @@ from PySide6.QtWidgets import (
 from . import context as context_module
 from .. import paths
 from ..models import ModSource
+from ..mods.archive import SUPPORTED_EXTENSIONS
+from ..mods.manager import ModManagerError
 from ..nexus.api import NexusAPIError, NexusRateLimitError
 from ..nexus.collections import CollectionAPIUnavailable, resolve_revision_bundle_url
 from ..nexus.nxm import NxmCollectionLink, NxmModLink, NxmParseError, parse_nxm
+
+
+def mod_name_from_filename(name: str) -> str:
+    """Trims an archive extension off a name destined for the mod list.
+
+    A download row is showing a *file*, so ``Foo_v1.2.zip`` is right there -
+    but carried into the mod list it makes every report read like a
+    directory listing ("AAF_UAP_v2.6.64.zip -> overridden by ..."). Only
+    known archive extensions are removed, so a mod legitimately named with a
+    dot in it keeps its name.
+    """
+    stripped = name.strip()
+    for suffix in SUPPORTED_EXTENSIONS:
+        if stripped.lower().endswith(suffix):
+            return stripped[: -len(suffix)].strip() or stripped
+    return stripped
 
 
 class _DownloadBridge(QObject):
@@ -39,6 +56,7 @@ class _DownloadBridge(QObject):
     progress = Signal(str, int, int)
     done = Signal(str, str)
     error = Signal(str, str)
+    install_done = Signal(str, str, bool, str)  # task_id, game_id, success, message
 
 
 class DownloadsTab(QWidget):
@@ -47,11 +65,13 @@ class DownloadsTab(QWidget):
         self.ctx = ctx
         self._rows: dict[str, int] = {}
         self._pending_install: dict[str, str] = {}  # task_id -> game_id
+        self._priority_hints: dict[str, int] = {}  # task_id -> intended mod priority (e.g. collection order)
 
         self.bridge = _DownloadBridge()
         self.bridge.progress.connect(self._on_progress)
         self.bridge.done.connect(self._on_done)
         self.bridge.error.connect(self._on_error)
+        self.bridge.install_done.connect(self._on_install_done)
 
         self.link_edit = QLineEdit()
         self.link_edit.setPlaceholderText("paste an nxm:// link here, or a direct https:// URL")
@@ -145,11 +165,23 @@ class DownloadsTab(QWidget):
         self._queue_download(task_id, name, url, paths.download_cache_dir())
 
     def queue_nexus_file(
-        self, domain: str, mod_id: int, file_id: int, display_name: str, game_id: str | None = None
+        self,
+        domain: str,
+        mod_id: int,
+        file_id: int,
+        display_name: str,
+        game_id: str | None = None,
+        priority_hint: int | None = None,
     ) -> str | None:
         """Resolves and queues a specific Nexus mod file directly (used by
         the Collections tab, where there's no nxm key/expires pair - this
         only works for premium API keys).
+
+        ``priority_hint``, if given, is used as the mod's priority once it
+        installs instead of appending at the end of the list - lets a
+        caller queueing a whole collection preserve its authored order in
+        the resulting load order, even though downloads complete out of
+        order (they run concurrently).
 
         Returns an error message on failure instead of showing a dialog
         itself, so a caller queueing many files in a loop (a whole
@@ -170,7 +202,43 @@ class DownloadsTab(QWidget):
         task_id = str(uuid.uuid4())
         source = ModSource(kind="nexus", mod_id=mod_id, file_id=file_id)
         self._queue_download(
-            task_id, display_name, mirrors[0]["URI"], paths.download_cache_dir(), source=source, game_id=game_id
+            task_id,
+            display_name,
+            mirrors[0]["URI"],
+            paths.download_cache_dir(),
+            source=source,
+            game_id=game_id,
+            priority_hint=priority_hint,
+        )
+        return None
+
+    def queue_direct_url(
+        self,
+        url: str,
+        display_name: str,
+        game_id: str | None = None,
+        priority_hint: int | None = None,
+        filename: str = "",
+    ) -> str | None:
+        """Queues a plain https download that has nothing to do with Nexus -
+        used for a collection's off-site files, which for Bethesda games are
+        usually GitHub releases (script extender plugins, preloaders). No API
+        key or account tier is involved; it's an ordinary file fetch.
+
+        Returns an error message on failure, matching queue_nexus_file so a
+        caller looping over a collection can aggregate failures.
+        """
+        if not url.lower().startswith(("http://", "https://")):
+            return f"unsupported off-site URL: {url}"
+        self._queue_download(
+            str(uuid.uuid4()),
+            display_name,
+            url,
+            paths.download_cache_dir(),
+            source=ModSource(kind="direct"),
+            game_id=game_id,
+            priority_hint=priority_hint,
+            filename=filename,
         )
         return None
 
@@ -184,8 +252,13 @@ class DownloadsTab(QWidget):
         dest_dir: Path,
         source: ModSource | None = None,
         game_id: str | None = None,
+        priority_hint: int | None = None,
+        filename: str = "",
     ) -> None:
-        dest_path = dest_dir / (Path(url.split("?")[0]).name or f"{task_id}.download")
+        # An explicit filename matters for release URLs, whose last path
+        # segment can be a version tag rather than the file itself - and the
+        # saved name decides the archive type we can extract.
+        dest_path = dest_dir / (filename or Path(url.split("?")[0]).name or f"{task_id}.download")
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(display_name))
@@ -196,6 +269,8 @@ class DownloadsTab(QWidget):
         self._rows[task_id] = row
         if game_id:
             self._pending_install[task_id] = game_id
+        if priority_hint is not None:
+            self._priority_hints[task_id] = priority_hint
 
         self.ctx.download_manager.submit(
             task_id,
@@ -227,21 +302,37 @@ class DownloadsTab(QWidget):
         game = self.ctx.config.games.get(game_id)
         if not game:
             return
-        reply = QMessageBox.question(
-            self, "Install mod", f"Downloaded for {game.name}. Install it now?"
-        )
-        if reply != QMessageBox.Yes:
-            return
-        default_name = Path(dest_path).stem
-        name, ok = QInputDialog.getText(self, "Mod name", "Display name:", text=default_name)
-        if not ok or not name:
-            return
+
+        raw_name = self.table.item(row, 0).text() if row is not None else Path(dest_path).name
+        name = mod_name_from_filename(raw_name)
+        if row is not None:
+            self.table.item(row, 2).setText("installing")
         manager = self.ctx.mod_manager(game_id)
-        manager.install_from_archive(dest_path, name)
-        self.ctx.notify_mods_changed(game_id)
+        priority_hint = self._priority_hints.pop(task_id, None)
+
+        def _install_job() -> None:
+            # Runs on lmm-install's single background thread - archive
+            # extraction is slow, and 200 downloads finishing in a burst
+            # would otherwise freeze the GUI running this synchronously.
+            try:
+                manager.install_from_archive(dest_path, name, priority=priority_hint)
+            except ModManagerError as exc:
+                self.bridge.install_done.emit(task_id, game_id, False, str(exc))
+            else:
+                self.bridge.install_done.emit(task_id, game_id, True, "")
+
+        self.ctx.install_executor.submit(_install_job)
+
+    def _on_install_done(self, task_id: str, game_id: str, success: bool, message: str) -> None:
+        row = self._rows.get(task_id)
+        if row is not None:
+            self.table.item(row, 2).setText("installed" if success else f"install failed: {message}")
+        if success:
+            self.ctx.notify_mods_changed(game_id)
 
     def _on_error(self, task_id: str, message: str) -> None:
         row = self._rows.get(task_id)
         if row is not None:
             self.table.item(row, 2).setText(f"error: {message}")
         self._pending_install.pop(task_id, None)
+        self._priority_hints.pop(task_id, None)

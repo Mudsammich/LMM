@@ -61,7 +61,35 @@ class CollectionModRef:
 
     @property
     def is_nexus(self) -> bool:
-        return self.source_type == "nexus" and self.mod_id and self.file_id
+        return bool(self.source_type == "nexus" and self.mod_id and self.file_id)
+
+    @property
+    def is_direct(self) -> bool:
+        """A file the collection points straight at by URL - typically a
+        GitHub release, since a lot of Fallout 4 / Skyrim tooling (script
+        extender plugins, preloaders) lives there rather than on Nexus.
+        These download with no Nexus API involvement at all."""
+        return bool(self.source_type == "direct" and self.direct_url)
+
+    @property
+    def is_browse_only(self) -> bool:
+        """The author deliberately said "go to this page and get it
+        yourself" - usually because the file sits behind a page that can't
+        be linked to directly. Not automatable by design; the URL is worth
+        showing the user so they know exactly what to fetch."""
+        return self.source_type == "browse" or (
+            self.source_type not in ("nexus", "direct") and bool(self.direct_url)
+        )
+
+    @property
+    def suggested_filename(self) -> str:
+        """Best guess at what to save a direct download as. The manifest's
+        logical filename is more reliable than the URL's last path segment,
+        which for a release link can be a version tag rather than a file."""
+        if self.logical_filename:
+            return self.logical_filename
+        tail = self.direct_url.split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+        return tail if "." in tail else ""
 
 
 @dataclass
@@ -188,6 +216,80 @@ query CollectionRevision($slug: String!, $domain: String!, $revision: Int) {
 """
 
 
+# Off-site files (GitHub releases and the like) live on a separate field
+# from modFiles. Its exact selection set is undocumented and unverified, so
+# it's queried *separately* from the main manifest rather than being added
+# to that query: an unknown field makes GraphQL reject the whole request,
+# and breaking the working mod-list fetch to chase a nice-to-have would be
+# a bad trade. Candidates are tried in order, widest first; the first one
+# the server accepts wins, and if none do we simply report no off-site
+# files instead of failing.
+_EXTERNAL_RESOURCE_FIELD_SETS = (
+    "name version optional instructions fileExpression resourceUrl resourceType",
+    "name version optional resourceUrl",
+    "name resourceUrl",
+    "name url",
+)
+
+
+def _external_resources_query(fields: str) -> str:
+    return """
+query CollectionExternals($slug: String!, $domain: String!, $revision: Int) {
+  collectionRevision(slug: $slug, domainName: $domain, revision: $revision) {
+    externalResources { %s }
+  }
+}
+""" % fields
+
+
+def _pick(data: dict[str, Any], *names: str) -> str:
+    """First non-empty value among ``names`` - lets one parser cope with
+    whichever field set the server actually accepted."""
+    for name in names:
+        value = data.get(name)
+        if value:
+            return str(value)
+    return ""
+
+
+def fetch_external_resources(
+    client: NexusClient, game_domain: str, slug: str, revision: int | None = None
+) -> list[CollectionModRef]:
+    """Best-effort fetch of a collection's off-site files. Returns an empty
+    list rather than raising if the query shape is wrong - see the note on
+    ``_EXTERNAL_RESOURCE_FIELD_SETS`` for why this can't be allowed to take
+    the main manifest fetch down with it."""
+    variables = {"slug": slug, "domain": game_domain, "revision": revision}
+    for fields in _EXTERNAL_RESOURCE_FIELD_SETS:
+        try:
+            data = client.graphql(_external_resources_query(fields), variables)
+        except NexusAPIError:
+            continue
+        revision_data = (data or {}).get("collectionRevision") or {}
+        raw = revision_data.get("externalResources")
+        if raw is None:
+            continue
+        return [_parse_external_resource(entry, game_domain) for entry in raw if entry]
+    return []
+
+
+def _parse_external_resource(entry: dict[str, Any], game_domain: str) -> CollectionModRef:
+    url = _pick(entry, "resourceUrl", "url", "fileUrl", "downloadUrl")
+    # A resource with a usable direct URL can be fetched automatically, the
+    # same as Vortex does; anything else is a "go and get this yourself".
+    resource_type = (_pick(entry, "resourceType") or "").lower()
+    is_browse = resource_type == "browse" or not url
+    return CollectionModRef(
+        name=_pick(entry, "name") or "unnamed off-site file",
+        version=_pick(entry, "version"),
+        optional=bool(entry.get("optional", False)),
+        domain_name=game_domain,
+        source_type="browse" if is_browse else "direct",
+        logical_filename=_pick(entry, "fileExpression", "logicalFilename"),
+        direct_url=url,
+    )
+
+
 def fetch_revision_manifest(
     client: NexusClient, game_domain: str, slug: str, revision: int | None = None
 ) -> CollectionManifest:
@@ -230,6 +332,11 @@ def fetch_revision_manifest(
                 file_id=f.get("fileId"),
             )
         )
+
+    # Appended after the Nexus files so the collection's own ordering of
+    # its mods is preserved; off-site tooling (script extenders, preloaders)
+    # doesn't participate in file-conflict ordering anyway.
+    mods.extend(fetch_external_resources(client, game_domain, slug, revision))
 
     return CollectionManifest(
         name=info.get("name", slug),

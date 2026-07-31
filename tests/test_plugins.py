@@ -101,3 +101,26 @@ def test_import_from_plugins_txt_skips_blank_and_comment_lines(tmp_path):
 
 def test_import_from_plugins_txt_missing_file_returns_empty(tmp_path):
     assert import_from_plugins_txt(tmp_path / "nope.txt") == []
+
+
+def test_detect_plugins_looks_inside_the_data_prefix():
+    """Deploy plans are game-root-relative now, so plugins live one level
+    down under the data folder."""
+    links = {
+        "Data/Thing.esp": None,
+        "Data/Other.esm": None,
+        "Data/Textures/notaplugin.dds": None,
+        "Data/F4SE/Plugins/nested.esp": None,  # too deep to be a real plugin
+        "WinHTTP.dll": None,
+        "RootLevel.esp": None,  # in the game root, not the data folder
+    }
+    assert detect_plugins(links, data_prefix="Data") == ["Other.esm", "Thing.esp"]
+
+
+def test_detect_plugins_matches_the_prefix_case_insensitively():
+    assert detect_plugins({"data/Thing.esp": None}, data_prefix="Data") == ["Thing.esp"]
+
+
+def test_detect_plugins_without_a_prefix_uses_top_level():
+    """Games that mod straight into their root have no data subfolder."""
+    assert detect_plugins({"Thing.esp": None, "sub/Other.esp": None}) == ["Thing.esp"]

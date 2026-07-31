@@ -6,11 +6,21 @@ install itself.
 """
 from __future__ import annotations
 
+import importlib.resources
 from pathlib import Path
 
 from platformdirs import user_config_dir, user_data_dir, user_cache_dir
 
 APP_NAME = "lmm"
+
+
+def icon_path() -> Path:
+    """The bundled app icon (ships inside the lmm package itself via
+    package-data, so it's available whether LMM was pip-installed or
+    installed as a system package - independent of whether the icon
+    theme cache on the system has picked up the separately-installed
+    hicolor icons yet)."""
+    return importlib.resources.files("lmm") / "assets" / "icon.svg"
 
 
 def config_dir() -> Path:

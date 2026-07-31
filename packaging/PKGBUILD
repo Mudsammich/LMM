@@ -32,6 +32,7 @@ depends=(
 	'python-py7zr'
 	'python-rarfile'
 	'xdg-utils'
+	'hicolor-icon-theme'
 )
 optdepends=(
 	'unrar: better .rar mod archive support'
@@ -39,6 +40,7 @@ optdepends=(
 	'bubblewrap: network-isolated game launches (Games > Launch Game)'
 )
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
+install=lmm.install
 source=()
 sha256sums=()
 
@@ -60,4 +62,10 @@ package() {
 	cd "$startdir/.."
 	python -m installer --destdir="$pkgdir" dist/*.whl
 	install -Dm644 packaging/lmm.desktop "$pkgdir/usr/share/applications/lmm.desktop"
+	for size in 16 24 32 48 64 128 256; do
+		install -Dm644 "packaging/icons/hicolor/${size}x${size}/apps/lmm.png" \
+			"$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/lmm.png"
+	done
+	install -Dm644 packaging/icons/hicolor/scalable/apps/lmm.svg \
+		"$pkgdir/usr/share/icons/hicolor/scalable/apps/lmm.svg"
 }
