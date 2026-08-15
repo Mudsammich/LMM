@@ -183,7 +183,9 @@ class GamesTab(QWidget):
                 "other is invisible to it. These are left over from a deployment made",
                 "before LMM merged casing, or were put there by hand or another tool.",
                 "",
-                "Undeploy then Deploy again to clear the ones LMM created.",
+                "Mods tab > Repair Deployment clears the ones LMM created, then Deploy",
+                "lays them out correctly. Anything still listed afterwards came from",
+                "somewhere else and has to be removed by hand.",
                 "",
             ]
             for duplicate in duplicates[:40]:
@@ -260,6 +262,9 @@ class GamesTab(QWidget):
         dialog = TextReportDialog(f"Diagnose - {game.name}", "\n".join(lines), parent=self)
         dialog.exec()
 
+        if duplicates:
+            self._offer_repair(game_id, game)
+
         if not status.enabled:
             reply = QMessageBox.question(
                 self,
@@ -278,6 +283,50 @@ class GamesTab(QWidget):
                 QMessageBox.information(
                     self, "Archive invalidation", f"Written to {written}"
                 )
+
+    def _offer_repair(self, game_id: str, game) -> None:
+        """Diagnose found case-duplicate folders, which is exactly what
+        Repair Deployment fixes - so offer it here rather than sending the
+        user to another tab to find it."""
+        manager = self.ctx.mod_manager(game_id)
+        count = manager.count_managed_links()
+        if not count:
+            QMessageBox.information(
+                self,
+                "Repair Deployment",
+                "None of those duplicate folders hold links LMM created, so there's "
+                "nothing it can safely remove - they were put there by hand or by "
+                "another tool, and need clearing manually.",
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Repair Deployment",
+            f"Remove the {count} link(s) LMM has deployed into the game folder now?\n\n"
+            "Only symlinks pointing into this game's mod staging folder are removed, "
+            "so the game's own files are never touched, and your installed mods are "
+            "unaffected. Deploy afterwards to lay them out correctly.\n\n"
+            "Anything still duplicated after this came from somewhere other than LMM.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            links, dirs = manager.repair_deployment()
+        except OSError as exc:
+            QMessageBox.critical(self, "Repair Deployment", f"{type(exc).__name__}: {exc}")
+            return
+        remaining = diagnostics.find_case_duplicates(game.install_path)
+        message = f"Removed {links} link(s) and {dirs} emptied folder(s).\n\n"
+        message += (
+            "No case-duplicate folders remain. Deploy your mods again from the Mods tab."
+            if not remaining
+            else f"{len(remaining)} case-duplicate location(s) remain - those weren't "
+            "created by LMM and need removing by hand. Run Diagnose again to list them."
+        )
+        QMessageBox.information(self, "Repair Deployment", message)
 
     def _remove_game(self) -> None:
         game_id = self._selected_game_id()
