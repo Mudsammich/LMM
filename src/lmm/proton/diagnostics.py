@@ -541,6 +541,25 @@ def check_address_library(
 # -- case-duplicate paths in the game folder -----------------------------------------------------
 
 
+_COUNT_CAP = 5000
+
+
+def _describe_entry(path: Path) -> str:
+    """A name plus how much is inside it, so the real folder and the stray
+    one can be told apart at a glance - which is the whole question when
+    deciding which of a pair to delete."""
+    if path.is_symlink():
+        return f"{path.name} (link)"
+    if path.is_file():
+        return f"{path.name} (file)"
+    count = 0
+    for _dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
+        count += len(filenames)
+        if count >= _COUNT_CAP:
+            return f"{path.name} ({_COUNT_CAP}+ files)"
+    return f"{path.name} ({count} file{'' if count == 1 else 's'})"
+
+
 @dataclass
 class CaseDuplicate:
     parent: Path
@@ -552,7 +571,8 @@ class CaseDuplicate:
         except ValueError:
             where = self.parent
         location = "." if str(where) == "." else str(where)
-        return f"{location}/  ->  {'  vs  '.join(self.names)}"
+        described = [_describe_entry(self.parent / name) for name in self.names]
+        return f"{location}/  ->  {'  vs  '.join(described)}"
 
 
 def find_case_duplicates(root: str | Path, limit: int = 200) -> list[CaseDuplicate]:

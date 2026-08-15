@@ -436,3 +436,32 @@ def test_find_case_duplicates_is_bounded(tmp_path):
 
 def test_find_case_duplicates_on_a_missing_folder(tmp_path):
     assert diagnostics.find_case_duplicates(tmp_path / "nope") == []
+
+
+def test_case_duplicate_describes_how_much_is_in_each(tmp_path):
+    """Which of a pair to delete is the whole question, and the file counts
+    answer it - the near-empty one is the stray."""
+    data = tmp_path / "Data"
+    real = data / "Scripts"
+    real.mkdir(parents=True)
+    for i in range(3):
+        (real / f"s{i}.pex").write_text("x")
+    stray = data / "scripts"
+    stray.mkdir()
+    (stray / "leftover.pex").write_text("x")
+
+    described = diagnostics.find_case_duplicates(tmp_path)[0].describe(tmp_path)
+
+    assert described == "Data/  ->  Scripts (3 files)  vs  scripts (1 file)"
+
+
+def test_case_duplicate_describes_files_and_links(tmp_path):
+    data = tmp_path / "Data"
+    data.mkdir()
+    (data / "PPF.esm").write_text("a")
+    (data / "ppf.esm").symlink_to(data / "PPF.esm")
+
+    described = diagnostics.find_case_duplicates(tmp_path)[0].describe(tmp_path)
+
+    assert "PPF.esm (file)" in described
+    assert "ppf.esm (link)" in described
