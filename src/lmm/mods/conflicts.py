@@ -37,6 +37,9 @@ class ConflictReport:
     total_paths: int = 0
     pairs: list[ConflictPair] = field(default_factory=list)
     by_path: dict[str, list[str]] = field(default_factory=dict)
+    # mod id -> {folded path: [the differing real paths]} - an archive at
+    # odds with itself, rather than with another mod.
+    internal_case_collisions: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     @property
     def mod_count(self) -> int:
@@ -44,18 +47,26 @@ class ConflictReport:
         return len(involved)
 
 
-def build_report(conflicts: dict[str, list[str]]) -> ConflictReport:
+def build_report(
+    conflicts: dict[str, list[str]],
+    internal_case_collisions: dict[str, dict[str, list[str]]] | None = None,
+) -> ConflictReport:
     """``conflicts`` is a ``deploy.DeployPlan.conflicts`` map: path -> the
     mod ids providing it, in ascending priority order (so the last one is
     the winner)."""
     pairs: dict[tuple[str, str], ConflictPair] = {}
+    inter_mod: dict[str, list[str]] = {}
     for path, providers in conflicts.items():
-        if len(providers) < 2:
+        # One mod can appear twice for a path when its own archive holds two
+        # case-variants of it. That's a flaw in the archive, reported
+        # separately - it isn't a conflict *between* mods and shouldn't
+        # inflate the count of them.
+        distinct = list(dict.fromkeys(providers))
+        if len(distinct) < 2:
             continue
-        winner = providers[-1]
-        for loser in providers[:-1]:
-            if loser == winner:
-                continue
+        inter_mod[path] = distinct
+        winner = distinct[-1]
+        for loser in distinct[:-1]:
             key = (loser, winner)
             pair = pairs.get(key)
             if pair is None:
@@ -66,16 +77,43 @@ def build_report(conflicts: dict[str, list[str]]) -> ConflictReport:
     for pair in ordered:
         pair.paths.sort()
     return ConflictReport(
-        total_paths=len(conflicts),
+        total_paths=len(inter_mod),
         pairs=ordered,
-        by_path=dict(sorted(conflicts.items())),
+        by_path=dict(sorted(inter_mod.items())),
+        internal_case_collisions=internal_case_collisions or {},
     )
+
+
+def _render_internal_collisions(report: ConflictReport, names: dict[str, str]) -> list[str]:
+    if not report.internal_case_collisions:
+        return []
+
+    def name_of(mod_id: str) -> str:
+        return names.get(mod_id, mod_id)
+
+    total = sum(len(paths) for paths in report.internal_case_collisions.values())
+    lines = [
+        "",
+        f"WARNING - {total} path(s) in {len(report.internal_case_collisions)} mod(s) exist "
+        "twice in the same archive under different capitalisation.",
+        "On Windows one would simply have overwritten the other, so only one was ever",
+        "meant to exist. LMM deploys one of them and can't know which the author meant -",
+        "if that mod misbehaves, this is why.",
+        "",
+    ]
+    for mod_id, collisions in sorted(report.internal_case_collisions.items()):
+        lines.append(f"  {name_of(mod_id)}:")
+        for paths in sorted(collisions.values()):
+            lines.append(f"    {'  vs  '.join(paths)}")
+    return lines
 
 
 def render_summary(report: ConflictReport, names: dict[str, str], limit: int = 40) -> str:
     """The at-a-glance view, for on-screen display."""
     if not report.total_paths:
-        return "No file conflicts among enabled mods."
+        no_conflicts = "No file conflicts among enabled mods."
+        internal = _render_internal_collisions(report, names)
+        return "\n".join([no_conflicts, *internal]) if internal else no_conflicts
 
     def name_of(mod_id: str) -> str:
         return names.get(mod_id, mod_id)
@@ -94,6 +132,7 @@ def render_summary(report: ConflictReport, names: dict[str, str], limit: int = 4
         )
     if len(report.pairs) > limit:
         lines.append(f"        … and {len(report.pairs) - limit} more mod pair(s) - see the log file.")
+    lines += _render_internal_collisions(report, names)
     return "\n".join(lines)
 
 
@@ -120,6 +159,10 @@ def render_log(report: ConflictReport, names: dict[str, str], game_name: str = "
         out.append(
             f"{pair.count:>6} file(s)  {name_of(pair.loser_id)}  ->  overridden by  {name_of(pair.winner_id)}"
         )
+
+    if report.internal_case_collisions:
+        out += ["", "=" * 72, "ARCHIVES CONTAINING THE SAME PATH TWICE (CASE ONLY)", "=" * 72]
+        out += _render_internal_collisions(report, names)
 
     out += ["", "=" * 72, "EVERY CONFLICTING FILE", "=" * 72, ""]
     for path, providers in report.by_path.items():

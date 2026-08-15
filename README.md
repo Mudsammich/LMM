@@ -45,7 +45,12 @@ otherwise every Windows-packaged mod is subtly broken here:
   game finds only one of them - so an unmerged deploy leaves `Textures`
   sitting next to `textures` in your Data folder with half your mods
   invisible. LMM picks one canonical spelling per folder and merges them,
-  preferring the game's own capitalisation where it already exists.
+  preferring the game's own capitalisation where it already exists. Two mods
+  shipping the same file under different capitalisation register as the
+  conflict they'd have been on Windows, resolved by the same priority order
+  as any other. A *single* archive containing both spellings of one path is
+  a flaw in that archive - only one was ever meant to exist - so that's
+  reported as a warning by **Show Conflicts** rather than silently resolved.
 - **Wrapper folders.** Many archives wrap their real payload in an extra
   `Data/` (mirroring where files end up) or a `My Cool Mod v1.2` folder.
   Deployed literally, every file sits one level too deep. LMM detects the

@@ -103,7 +103,31 @@ def scan_mod_files(mod_root: Path) -> list[Path]:
         if rel.parts and rel.parts[0].lower() in _NON_CONTENT_TOP_LEVEL:
             continue
         found.append(rel)
+    # rglob yields directory order, which varies between filesystems and even
+    # between runs. Sorting keeps deploys reproducible: without it, which of
+    # two case-variant paths wins - and so which spelling becomes canonical -
+    # would be down to whatever order the directory happened to enumerate in.
+    found.sort()
     return found
+
+
+def find_case_collisions(mod_root: Path) -> dict[str, list[str]]:
+    """Paths *within a single mod* that differ only in capitalisation.
+
+    Across mods this is routine and handled by ``CaseRegistry``, but one
+    archive containing both ``Test/foo.txt`` and ``test/foo.txt`` is a flaw
+    in that archive: on Windows the second would have overwritten the first
+    at pack time, so whichever content the author intended, only one of
+    these was ever meant to exist. LMM has to pick one and can't know which,
+    so the honest thing is to say so rather than silently choose.
+
+    Returns folded path -> the differing real paths (2 or more).
+    """
+    by_folded: dict[str, list[str]] = {}
+    for rel in scan_mod_files(mod_root):
+        posix = rel.as_posix()
+        by_folded.setdefault(posix.lower(), []).append(posix)
+    return {folded: paths for folded, paths in by_folded.items() if len(paths) > 1}
 
 
 class CaseRegistry:

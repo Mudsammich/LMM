@@ -319,7 +319,13 @@ class ModManager:
         and the path of the full log written alongside. The exhaustive
         per-file listing goes to the log because a large modlist produces
         thousands of them - far past what's readable on screen."""
-        report = conflicts_module.build_report(self.preview_conflicts())
+        mods_dir = Path(self.game.mods_dir)
+        internal = {}
+        for mod in self._enabled_mods_sorted():
+            collisions = deploy.find_case_collisions(mods_dir / mod.staging_subdir)
+            if collisions:
+                internal[mod.id] = collisions
+        report = conflicts_module.build_report(self.preview_conflicts(), internal)
         with self._lock:
             names = {m.id: m.name for m in self._mods.values()}
         log_path = conflicts_module.write_log(self.state_dir, report, names, self.game.name)
