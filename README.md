@@ -298,7 +298,12 @@ where they're easy to miss:
   and can only ever find one of them, so whatever is in the other is
   invisible to it. Diagnose lists them. They're the fingerprint of a deploy
   made before LMM merged casing, or of files put there by hand or another
-  tool; **Undeploy** then **Deploy** clears the ones LMM created.
+  tool. **Undeploy** then **Deploy** clears the ones LMM created; if the
+  deployment is old enough that LMM's records no longer describe it, use
+  **Repair Deployment…** on the Mods tab instead - it finds LMM's links on
+  disk rather than from its records, so it also clears files stranded in a
+  nested `Data/Data` folder. It only ever removes symlinks pointing into the
+  game's mod staging folder, so the game's own files are never at risk.
 - **Archive invalidation.** Bethesda games ship their assets in `.ba2`/`.bsa`
   archives, and by default a loose file on disk does *not* override what's
   inside them. LMM deploys everything as loose files, so without archive

@@ -76,6 +76,7 @@ class ModsTab(QWidget):
         conflicts_btn = QPushButton("Show Conflicts")
         suggest_order_btn = QPushButton("Suggest Order (beta)")
         deploy_root_btn = QPushButton("Deploy Target…")
+        repair_btn = QPushButton("Repair Deployment…")
 
         install_btn.clicked.connect(self._install_from_archive)
         select_all_btn.clicked.connect(self.table.selectAll)
@@ -88,12 +89,13 @@ class ModsTab(QWidget):
         conflicts_btn.clicked.connect(self._show_conflicts)
         suggest_order_btn.clicked.connect(self._suggest_order)
         deploy_root_btn.clicked.connect(self._set_deploy_root)
+        repair_btn.clicked.connect(self._repair_deployment)
 
         button_row = QHBoxLayout()
         for b in (
             install_btn, select_all_btn, remove_btn, remove_all_btn,
             up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn,
-            suggest_order_btn, deploy_root_btn,
+            suggest_order_btn, deploy_root_btn, repair_btn,
         ):
             button_row.addWidget(b)
         button_row.addStretch(1)
@@ -370,6 +372,49 @@ class ModsTab(QWidget):
         manager.reorder(suggestion.new_order)
         self.ctx.notify_mods_changed(game_id)
         self.status_label.setText(f"Reordered based on {len(lines)} conflict-resolution hint(s).")
+
+    def _repair_deployment(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        game = self.ctx.config.games[game_id]
+        count = manager.count_managed_links()
+        if not count:
+            QMessageBox.information(
+                self,
+                "Repair Deployment",
+                "No deployed links found in the game folder - there's nothing to "
+                "repair. Anything left there wasn't put there by LMM.",
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Repair Deployment",
+            f"Remove all {count} link(s) LMM has deployed into:\n{game.install_path}\n\n"
+            "This finds them on disk rather than from LMM's records, so it also "
+            "cleans up a deployment made by an older version - files left in a "
+            "nested Data folder, or split across folders differing only in case.\n\n"
+            "Only symlinks pointing into this game's mod staging folder are "
+            "removed, so the game's own files are never touched. Your installed "
+            "mods are not affected - click Deploy afterwards to lay them out "
+            "correctly.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            links, dirs = manager.repair_deployment()
+        except OSError as exc:
+            QMessageBox.critical(self, "Repair Deployment", f"{type(exc).__name__}: {exc}")
+            return
+        self.status_label.setText(
+            f"Removed {links} deployed link(s) and {dirs} emptied folder(s). "
+            "Click Deploy to lay your mods out again."
+        )
 
     def _set_deploy_root(self) -> None:
         game_id = self._current_game_id()

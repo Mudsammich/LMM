@@ -562,3 +562,25 @@ def test_concurrent_installs_do_not_corrupt_state(tmp_path, game):
     # ended up consistent, not just the in-memory dict.
     reloaded = ModManager(game)
     assert {m.id for m in reloaded.list_mods()} == set(installed_ids)
+
+
+def test_repair_deployment_cleans_up_and_allows_redeploy(tmp_path, game):
+    archive_path = tmp_path / "m.zip"
+    _make_zip(archive_path, {"Textures/thing.dds": "x"})
+
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "Tex Mod")
+    manager.deploy()
+
+    install = tmp_path / "install"
+    assert (install / "Data" / "Textures" / "thing.dds").is_symlink()
+
+    links, _dirs = manager.repair_deployment()
+    assert links == 1
+    assert not (install / "Data" / "Textures").exists()
+    assert not (manager.state_dir / "deployed.json").exists()
+
+    # The mod itself is untouched and redeploys cleanly.
+    assert [m.name for m in manager.list_mods()] == ["Tex Mod"]
+    manager.deploy()
+    assert (install / "Data" / "Textures" / "thing.dds").read_text() == "x"
