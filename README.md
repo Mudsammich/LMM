@@ -293,6 +293,12 @@ Games tab → **Diagnose…** checks the two things that most often make a
 correctly-deployed modlist fail, both of which live inside the Proton prefix
 where they're easy to miss:
 
+- **Duplicate paths differing only in case.** `Scripts` next to `scripts`
+  in the game folder is never intentional - the game is a Windows program
+  and can only ever find one of them, so whatever is in the other is
+  invisible to it. Diagnose lists them. They're the fingerprint of a deploy
+  made before LMM merged casing, or of files put there by hand or another
+  tool; **Undeploy** then **Deploy** clears the ones LMM created.
 - **Archive invalidation.** Bethesda games ship their assets in `.ba2`/`.bsa`
   archives, and by default a loose file on disk does *not* override what's
   inside them. LMM deploys everything as loose files, so without archive

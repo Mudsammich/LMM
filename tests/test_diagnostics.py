@@ -384,3 +384,55 @@ def test_no_extender_folder_at_all(tmp_path):
 
     assert status.plugins_dir is None
     assert "No script extender Plugins folder" in status.detail
+
+
+# -- duplicate paths differing only in case -----------------------------------------------------
+
+
+def test_find_case_duplicates_spots_split_folders(tmp_path):
+    """The fingerprint of a deploy made before casing was merged: the game
+    can only find one of these, so half the mod is invisible to it."""
+    data = tmp_path / "Data"
+    (data / "Scripts").mkdir(parents=True)
+    (data / "scripts").mkdir()
+    (data / "SCRIPTS").mkdir()
+    (data / "Textures").mkdir()
+
+    duplicates = diagnostics.find_case_duplicates(tmp_path)
+
+    assert len(duplicates) == 1
+    assert duplicates[0].names == ["SCRIPTS", "Scripts", "scripts"]
+    assert duplicates[0].describe(tmp_path).startswith("Data/")
+
+
+def test_find_case_duplicates_spots_split_files(tmp_path):
+    data = tmp_path / "Data"
+    data.mkdir()
+    (data / "PPF.esm").write_text("a")
+    (data / "ppf.esm").write_text("b")
+
+    duplicates = diagnostics.find_case_duplicates(tmp_path)
+
+    assert [d.names for d in duplicates] == [["PPF.esm", "ppf.esm"]]
+
+
+def test_find_case_duplicates_clean_install(tmp_path):
+    data = tmp_path / "Data" / "Textures"
+    data.mkdir(parents=True)
+    (data / "thing.dds").write_text("x")
+
+    assert diagnostics.find_case_duplicates(tmp_path) == []
+
+
+def test_find_case_duplicates_is_bounded(tmp_path):
+    data = tmp_path / "Data"
+    data.mkdir()
+    for i in range(30):
+        (data / f"Dir{i}").mkdir()
+        (data / f"dir{i}").mkdir()
+
+    assert len(diagnostics.find_case_duplicates(tmp_path, limit=5)) == 5
+
+
+def test_find_case_duplicates_on_a_missing_folder(tmp_path):
+    assert diagnostics.find_case_duplicates(tmp_path / "nope") == []

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from datetime import datetime
+from pathlib import Path
 
 from .context import AppContext
 from .dialogs import AddEditGameDialog
@@ -160,8 +161,37 @@ class GamesTab(QWidget):
         status = diagnostics.check_archive_invalidation(game.proton_prefix, folder)
         logs = diagnostics.find_game_logs(game.proton_prefix, folder)
 
+        # Checked against the real game folder rather than staging: these
+        # are the game's own view, whatever put them there.
+        duplicates = diagnostics.find_case_duplicates(game.install_path)
+
         lines = [
             f"Game folder in prefix: {folder}",
+            "",
+            "DUPLICATE PATHS DIFFERING ONLY IN CASE",
+            "-" * 60,
+        ]
+        if not duplicates:
+            lines.append(
+                "None - every path in the game folder is unique to the game, which "
+                "is a Windows program and can't tell 'Scripts' from 'scripts'."
+            )
+        else:
+            lines += [
+                f"PROBLEM - {len(duplicates)} location(s) hold names that differ only in",
+                "case. The game can only ever find one of each, so whatever is in the",
+                "other is invisible to it. These are left over from a deployment made",
+                "before LMM merged casing, or were put there by hand or another tool.",
+                "",
+                "Undeploy then Deploy again to clear the ones LMM created.",
+                "",
+            ]
+            for duplicate in duplicates[:40]:
+                lines.append(f"  {duplicate.describe(Path(game.install_path))}")
+            if len(duplicates) > 40:
+                lines.append(f"  … and {len(duplicates) - 40} more")
+
+        lines += [
             "",
             "ARCHIVE INVALIDATION",
             "-" * 60,

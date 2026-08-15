@@ -20,6 +20,7 @@ finds by accident.
 from __future__ import annotations
 
 import configparser
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -535,6 +536,52 @@ def check_address_library(
             "game back on a version the modlist supports."
         )
     return status
+
+
+# -- case-duplicate paths in the game folder -----------------------------------------------------
+
+
+@dataclass
+class CaseDuplicate:
+    parent: Path
+    names: list[str]
+
+    def describe(self, root: Path) -> str:
+        try:
+            where = self.parent.relative_to(root)
+        except ValueError:
+            where = self.parent
+        location = "." if str(where) == "." else str(where)
+        return f"{location}/  ->  {'  vs  '.join(self.names)}"
+
+
+def find_case_duplicates(root: str | Path, limit: int = 200) -> list[CaseDuplicate]:
+    """Entries in the *game's own folder* whose names differ only in case.
+
+    These can't be intentional: the game is a Windows program, so
+    ``Scripts`` and ``scripts`` in one directory are the same folder as far
+    as it is concerned, and only one of them will be found. They're the
+    fingerprint of a deployment made before LMM merged casing - or of files
+    put there by hand or by another tool - and each one hides part of a mod.
+
+    Deliberately checks the real game directory rather than the staging
+    area, because that's where the game actually looks, whatever put them
+    there.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    found: list[CaseDuplicate] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        by_folded: dict[str, list[str]] = {}
+        for name in list(dirnames) + list(filenames):
+            by_folded.setdefault(name.lower(), []).append(name)
+        for names in by_folded.values():
+            if len(names) > 1:
+                found.append(CaseDuplicate(parent=Path(dirpath), names=sorted(names)))
+                if len(found) >= limit:
+                    return found
+    return found
 
 
 def read_log_tail(path: str | Path, max_bytes: int = 64 * 1024) -> str:
