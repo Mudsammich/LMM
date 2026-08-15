@@ -140,6 +140,23 @@ python-vdf`), or build the whole package with an AUR helper pointed at
 plain `pacman`/`makepkg` handles them. `unrar` is an optional dependency
 needed only if you install `.rar` mod archives.
 
+### Updating an existing checkout
+
+```sh
+./scripts/update-and-build.sh
+```
+
+Syncs the checkout to its remote branch and rebuilds. Worth using rather
+than doing it by hand, because two things reliably go wrong there: `makepkg`
+rewrites the `pkgver=` line in `PKGBUILD` after every build, so the tree is
+always dirty and the next `git pull` refuses to run; and the development
+branch is restarted from `main` after each merge, which rewrites history
+`git pull` can't reconcile. Both failures stop the *pull* but not the
+*build*, so it quietly rebuilds the old commit and the package manager
+reports it as already up to date. The script drops the generated PKGBUILD
+edit, resets to the remote, builds, and leaves the tree clean - refusing to
+touch anything if you have real local changes.
+
 ### From source (any distro)
 
 ```sh
@@ -347,6 +364,7 @@ src/lmm/
 tests/                             pytest suite for everything above the GUI layer
 packaging/                         PKGBUILD, .desktop file, and generated hicolor icons for Arch/CachyOS
 scripts/generate_icons.py          regenerates packaging/icons/ from src/lmm/assets/icon.svg
+scripts/update-and-build.sh        sync this checkout to its branch and rebuild the package
 ```
 
 The GUI is a thin layer over `mods/manager.py`, `mods/deploy.py`,
