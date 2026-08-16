@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from datetime import datetime
+from pathlib import Path
 
 from .context import AppContext
 from .dialogs import AddEditGameDialog
@@ -160,8 +161,60 @@ class GamesTab(QWidget):
         status = diagnostics.check_archive_invalidation(game.proton_prefix, folder)
         logs = diagnostics.find_game_logs(game.proton_prefix, folder)
 
+        # Checked against the real game folder rather than staging: these
+        # are the game's own view, whatever put them there.
+        duplicates = diagnostics.find_case_duplicates(game.install_path)
+
         lines = [
             f"Game folder in prefix: {folder}",
+            "",
+            "DUPLICATE PATHS DIFFERING ONLY IN CASE",
+            "-" * 60,
+        ]
+        hiding = [d for d in duplicates if d.hides_something]
+        empty = [d for d in duplicates if not d.hides_something]
+        root = Path(game.install_path)
+
+        if not duplicates:
+            lines.append(
+                "None - every path in the game folder is unique to the game, which "
+                "is a Windows program and can't tell 'Scripts' from 'scripts'."
+            )
+        else:
+            if hiding:
+                lines += [
+                    f"PROBLEM - {len(hiding)} location(s) hold the same name twice with",
+                    "something real in at least one of them. The game finds only one, so",
+                    "whatever is in the other is invisible to it.",
+                    "",
+                    "Mods tab > Repair Deployment clears the ones LMM created, then",
+                    "Deploy lays them out correctly. Anything still listed afterwards",
+                    "came from somewhere else and has to be merged or removed by hand -",
+                    "move the smaller folder's contents into the larger, then delete it.",
+                    "",
+                ]
+                for duplicate in hiding[:40]:
+                    lines.append(f"  {duplicate.describe(root)}")
+                if len(hiding) > 40:
+                    lines.append(f"  … and {len(hiding) - 40} more")
+            else:
+                lines.append("No duplicate is hiding anything - nothing is being shadowed.")
+
+            if empty:
+                lines += [
+                    "",
+                    f"Plus {len(empty)} duplicate(s) where both sides are empty. Those",
+                    "hide nothing - they're leftover folder shells - but they're still",
+                    "clutter, and LMM can clear them safely since removing an empty",
+                    "folder loses nothing.",
+                    "",
+                ]
+                for duplicate in empty[:15]:
+                    lines.append(f"  {duplicate.describe(root)}")
+                if len(empty) > 15:
+                    lines.append(f"  … and {len(empty) - 15} more")
+
+        lines += [
             "",
             "ARCHIVE INVALIDATION",
             "-" * 60,
@@ -230,6 +283,27 @@ class GamesTab(QWidget):
         dialog = TextReportDialog(f"Diagnose - {game.name}", "\n".join(lines), parent=self)
         dialog.exec()
 
+        if empty:
+            reply = QMessageBox.question(
+                self,
+                "Empty duplicate folders",
+                f"Remove {len(empty)} empty folder(s) that exist only as a "
+                "differently-capitalised copy of a folder beside them?\n\n"
+                "Each one is empty, so nothing is lost, and the version beside it "
+                "stays - so the path itself doesn't disappear, it just stops "
+                "existing twice.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                pruned = diagnostics.prune_empty_case_duplicates(game.install_path)
+                QMessageBox.information(
+                    self, "Empty duplicate folders", f"Removed {pruned} empty folder(s)."
+                )
+
+        if hiding:
+            self._offer_repair(game_id, game)
+
         if not status.enabled:
             reply = QMessageBox.question(
                 self,
@@ -248,6 +322,50 @@ class GamesTab(QWidget):
                 QMessageBox.information(
                     self, "Archive invalidation", f"Written to {written}"
                 )
+
+    def _offer_repair(self, game_id: str, game) -> None:
+        """Diagnose found case-duplicate folders, which is exactly what
+        Repair Deployment fixes - so offer it here rather than sending the
+        user to another tab to find it."""
+        manager = self.ctx.mod_manager(game_id)
+        count = manager.count_managed_links()
+        if not count:
+            QMessageBox.information(
+                self,
+                "Repair Deployment",
+                "None of those duplicate folders hold links LMM created, so there's "
+                "nothing it can safely remove - they were put there by hand or by "
+                "another tool, and need clearing manually.",
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Repair Deployment",
+            f"Remove the {count} link(s) LMM has deployed into the game folder now?\n\n"
+            "Only symlinks pointing into this game's mod staging folder are removed, "
+            "so the game's own files are never touched, and your installed mods are "
+            "unaffected. Deploy afterwards to lay them out correctly.\n\n"
+            "Anything still duplicated after this came from somewhere other than LMM.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            links, dirs = manager.repair_deployment()
+        except OSError as exc:
+            QMessageBox.critical(self, "Repair Deployment", f"{type(exc).__name__}: {exc}")
+            return
+        remaining = diagnostics.find_case_duplicates(game.install_path)
+        message = f"Removed {links} link(s) and {dirs} emptied folder(s).\n\n"
+        message += (
+            "No case-duplicate folders remain. Deploy your mods again from the Mods tab."
+            if not remaining
+            else f"{len(remaining)} case-duplicate location(s) remain - those weren't "
+            "created by LMM and need removing by hand. Run Diagnose again to list them."
+        )
+        QMessageBox.information(self, "Repair Deployment", message)
 
     def _remove_game(self) -> None:
         game_id = self._selected_game_id()

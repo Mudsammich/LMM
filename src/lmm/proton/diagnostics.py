@@ -20,7 +20,9 @@ finds by accident.
 from __future__ import annotations
 
 import configparser
+import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -316,15 +318,46 @@ class ExtenderSummary:
         return len(self.loaded) + len(self.failed)
 
 
-def decode_runtime_version(raw: str) -> str:
+def _packs_subminor(extender_version: str) -> bool:
+    """Whether this script extender build packs a sub-minor into the low
+    nibble of the runtime version.
+
+    F4SE changed encoding at 0.7: the older builds put the game's build
+    number straight into the low 16 bits (``010A00A3`` = 1.10.163), while
+    0.7+ shifts it up four bits to make room for a sub-minor
+    (``010B0DD0`` = 1.11.221.0, *not* 1.11.3536). Decoding a 0.7-era value
+    with the old rule yields a version number that doesn't exist, which is
+    worse than useless when it's the number you go searching Nexus with.
+    """
+    try:
+        major_text, _, rest = extender_version.partition(".")
+        minor_text = rest.partition(".")[0]
+        major, minor = int(major_text), int(minor_text)
+    except (TypeError, ValueError):
+        return False
+    return (major, minor) >= (0, 7)
+
+
+def decode_runtime_version(raw: str, extender_version: str = "") -> str:
     """Turns the script extender's packed runtime version into the dotted
-    form the mod pages use. ``010A00A3`` -> ``1.10.163``, which is the
-    number to compare against what a mod says it supports."""
+    form mod pages quote - the number to compare against what a mod says it
+    supports.
+
+    ``extender_version`` selects the encoding (see ``_packs_subminor``); with
+    it unknown the older layout is assumed, since that's the one the format
+    is historically documented with.
+    """
     try:
         value = int(raw, 16)
-    except ValueError:
+    except (TypeError, ValueError):
         return ""
-    return f"{(value >> 24) & 0xFF}.{(value >> 16) & 0xFF}.{value & 0xFFFF}"
+    major = (value >> 24) & 0xFF
+    minor = (value >> 16) & 0xFF
+    low = value & 0xFFFF
+    if _packs_subminor(extender_version):
+        build, sub = low >> 4, low & 0xF
+        return f"{major}.{minor}.{build}" + (f".{sub}" if sub else "")
+    return f"{major}.{minor}.{low}"
 
 
 def summarise_extender_log(text: str) -> ExtenderSummary:
@@ -344,7 +377,9 @@ def summarise_extender_log(text: str) -> ExtenderSummary:
         if runtime_match:
             summary.extender_version = runtime_match.group("extender")
             summary.runtime_raw = runtime_match.group("runtime").upper()
-            summary.runtime_version = decode_runtime_version(summary.runtime_raw)
+            summary.runtime_version = decode_runtime_version(
+                summary.runtime_raw, summary.extender_version
+            )
             continue
         plugin_match = _PLUGIN_LINE.match(line)
         if not plugin_match:
@@ -502,6 +537,143 @@ def check_address_library(
             "game back on a version the modlist supports."
         )
     return status
+
+
+# -- case-duplicate paths in the game folder -----------------------------------------------------
+
+
+_COUNT_CAP = 5000
+
+# Counts below are file counts; these mark entries that aren't directories.
+_IS_FILE = -1
+_IS_LINK = -2
+
+
+def _count_contents(path: Path) -> int:
+    """Files under ``path``, or a marker for a non-directory. Bounded, so a
+    folder holding a hundred thousand files can't turn a diagnostic into a
+    long wait."""
+    if path.is_symlink():
+        return _IS_LINK
+    if path.is_file():
+        return _IS_FILE
+    count = 0
+    for _dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
+        count += len(filenames)
+        if count >= _COUNT_CAP:
+            return _COUNT_CAP
+    return count
+
+
+def _describe_count(name: str, count: int) -> str:
+    if count == _IS_LINK:
+        return f"{name} (link)"
+    if count == _IS_FILE:
+        return f"{name} (file)"
+    if count >= _COUNT_CAP:
+        return f"{name} ({_COUNT_CAP}+ files)"
+    return f"{name} ({count} file{'' if count == 1 else 's'})"
+
+
+@dataclass
+class CaseDuplicate:
+    parent: Path
+    names: list[str]
+    counts: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def hides_something(self) -> bool:
+        """True when at least one side actually holds something.
+
+        An all-empty set is only clutter: the game can still find nothing in
+        either, so nothing is being shadowed. Separating the two matters
+        because a modded game folder accumulates dozens of empty
+        case-duplicate shells, and burying the one duplicate that *is*
+        hiding files among them defeats the point of reporting it.
+        """
+        return any(count != 0 for count in self.counts.values())
+
+    def describe(self, root: Path) -> str:
+        try:
+            where = self.parent.relative_to(root)
+        except ValueError:
+            where = self.parent
+        location = "." if str(where) == "." else str(where)
+        described = [_describe_count(name, self.counts.get(name, 0)) for name in self.names]
+        return f"{location}/  ->  {'  vs  '.join(described)}"
+
+
+def find_case_duplicates(root: str | Path, limit: int = 200) -> list[CaseDuplicate]:
+    """Entries in the *game's own folder* whose names differ only in case.
+
+    These can't be intentional: the game is a Windows program, so
+    ``Scripts`` and ``scripts`` in one directory are the same folder as far
+    as it is concerned, and only one of them will be found. They're the
+    fingerprint of a deployment made before LMM merged casing - or of files
+    put there by hand or by another tool - and each one hides part of a mod.
+
+    Deliberately checks the real game directory rather than the staging
+    area, because that's where the game actually looks, whatever put them
+    there.
+    """
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    found: list[CaseDuplicate] = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        by_folded: dict[str, list[str]] = {}
+        for name in list(dirnames) + list(filenames):
+            by_folded.setdefault(name.lower(), []).append(name)
+        for names in by_folded.values():
+            if len(names) > 1:
+                parent = Path(dirpath)
+                ordered = sorted(names)
+                found.append(
+                    CaseDuplicate(
+                        parent=parent,
+                        names=ordered,
+                        counts={name: _count_contents(parent / name) for name in ordered},
+                    )
+                )
+                if len(found) >= limit:
+                    return found
+    return found
+
+
+def prune_empty_case_duplicates(root: str | Path, max_passes: int = 8) -> int:
+    """Removes empty directories that exist only as a case-variant of a
+    sibling, and returns how many went.
+
+    Safe in a way that deleting empty directories generally isn't: each one
+    removed is provably empty (so nothing is lost) *and* has a sibling
+    differing only in case that stays behind (so the path itself doesn't
+    disappear - the game still finds it, under one spelling instead of two).
+
+    Repeats until stable, because emptying a directory can leave its parent
+    empty and itself half of a duplicate one level up.
+    """
+    root = Path(root)
+    removed = 0
+    for _ in range(max_passes):
+        removed_this_pass = 0
+        for duplicate in find_case_duplicates(root, limit=10_000):
+            empties = [
+                name for name in duplicate.names if duplicate.counts.get(name) == 0
+            ]
+            # Never take the last one: that would delete the path outright
+            # rather than resolve the duplicate.
+            if len(empties) == len(duplicate.names):
+                empties = empties[1:]
+            for name in empties:
+                try:
+                    shutil.rmtree(duplicate.parent / name)
+                    removed_this_pass += 1
+                except OSError:
+                    pass
+        removed += removed_this_pass
+        if not removed_this_pass:
+            break
+    return removed
 
 
 def read_log_tail(path: str | Path, max_bytes: int = 64 * 1024) -> str:

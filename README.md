@@ -45,7 +45,12 @@ otherwise every Windows-packaged mod is subtly broken here:
   game finds only one of them - so an unmerged deploy leaves `Textures`
   sitting next to `textures` in your Data folder with half your mods
   invisible. LMM picks one canonical spelling per folder and merges them,
-  preferring the game's own capitalisation where it already exists.
+  preferring the game's own capitalisation where it already exists. Two mods
+  shipping the same file under different capitalisation register as the
+  conflict they'd have been on Windows, resolved by the same priority order
+  as any other. A *single* archive containing both spellings of one path is
+  a flaw in that archive - only one was ever meant to exist - so that's
+  reported as a warning by **Show Conflicts** rather than silently resolved.
 - **Wrapper folders.** Many archives wrap their real payload in an extra
   `Data/` (mirroring where files end up) or a `My Cool Mod v1.2` folder.
   Deployed literally, every file sits one level too deep. LMM detects the
@@ -135,6 +140,23 @@ python-vdf`), or build the whole package with an AUR helper pointed at
 plain `pacman`/`makepkg` handles them. `unrar` is an optional dependency
 needed only if you install `.rar` mod archives.
 
+### Updating an existing checkout
+
+```sh
+./scripts/update-and-build.sh
+```
+
+Syncs the checkout to its remote branch and rebuilds. Worth using rather
+than doing it by hand, because two things reliably go wrong there: `makepkg`
+rewrites the `pkgver=` line in `PKGBUILD` after every build, so the tree is
+always dirty and the next `git pull` refuses to run; and the development
+branch is restarted from `main` after each merge, which rewrites history
+`git pull` can't reconcile. Both failures stop the *pull* but not the
+*build*, so it quietly rebuilds the old commit and the package manager
+reports it as already up to date. The script drops the generated PKGBUILD
+edit, resets to the remote, builds, and leaves the tree clean - refusing to
+touch anything if you have real local changes.
+
 ### From source (any distro)
 
 ```sh
@@ -183,10 +205,19 @@ Reorder mods (later = higher priority = wins file conflicts), then
 **Deploy**. **Show Conflicts** lists exactly which files collide between
 mods before you deploy, so you're not guessing.
 
+**Filter** (the box next to the game selector, or Ctrl+F) narrows the list
+as you type - by name or source, matching every space-separated term, so
+"armor patch" finds it without remembering the exact name. Essential once a
+list runs to hundreds of mods and one of them is misbehaving. **Select All**
+respects the filter, so it's safe to filter and then act on the whole
+result. The plugin list has its own filter for the same reason.
+
 The mod table supports ctrl/shift-click multi-select: **Remove Selected**
 deletes everything selected in one confirmation instead of one at a time,
 and **Remove All…** clears a game's entire mod list in one step (handy for
-starting over after a big collection install).
+starting over after a big collection install). Removing mods doesn't
+undeploy them, so their files would otherwise stay in the game folder
+pointing at nothing - LMM offers to clear those out straight afterwards.
 
 **Suggest Order (beta)** proposes a reorder to resolve file conflicts,
 using two real modding conventions rather than a guess: a mod whose name
@@ -288,6 +319,22 @@ Games tab → **Diagnose…** checks the two things that most often make a
 correctly-deployed modlist fail, both of which live inside the Proton prefix
 where they're easy to miss:
 
+- **Duplicate paths differing only in case.** `Scripts` next to `scripts`
+  in the game folder is never intentional - the game is a Windows program
+  and can only ever find one of them, so whatever is in the other is
+  invisible to it. Diagnose lists them. They're the fingerprint of a deploy
+  made before LMM merged casing, or of files put there by hand or another
+  tool. Diagnose separates the ones actually hiding files from empty
+  leftover shells, since a modded game folder collects plenty of the latter
+  and they'd otherwise bury the former; it offers to clear the empty ones,
+  which is safe because each removal loses nothing and leaves the
+  identically-named folder beside it. **Undeploy** then **Deploy** clears
+  the ones LMM created; if the
+  deployment is old enough that LMM's records no longer describe it, use
+  **Repair Deployment…** on the Mods tab instead - it finds LMM's links on
+  disk rather than from its records, so it also clears files stranded in a
+  nested `Data/Data` folder. It only ever removes symlinks pointing into the
+  game's mod staging folder, so the game's own files are never at risk.
 - **Archive invalidation.** Bethesda games ship their assets in `.ba2`/`.bsa`
   archives, and by default a loose file on disk does *not* override what's
   inside them. LMM deploys everything as loose files, so without archive
@@ -331,6 +378,7 @@ src/lmm/
 tests/                             pytest suite for everything above the GUI layer
 packaging/                         PKGBUILD, .desktop file, and generated hicolor icons for Arch/CachyOS
 scripts/generate_icons.py          regenerates packaging/icons/ from src/lmm/assets/icon.svg
+scripts/update-and-build.sh        sync this checkout to its branch and rebuild the package
 ```
 
 The GUI is a thin layer over `mods/manager.py`, `mods/deploy.py`,

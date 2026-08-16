@@ -562,3 +562,54 @@ def test_concurrent_installs_do_not_corrupt_state(tmp_path, game):
     # ended up consistent, not just the in-memory dict.
     reloaded = ModManager(game)
     assert {m.id for m in reloaded.list_mods()} == set(installed_ids)
+
+
+def test_repair_deployment_cleans_up_and_allows_redeploy(tmp_path, game):
+    archive_path = tmp_path / "m.zip"
+    _make_zip(archive_path, {"Textures/thing.dds": "x"})
+
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "Tex Mod")
+    manager.deploy()
+
+    install = tmp_path / "install"
+    assert (install / "Data" / "Textures" / "thing.dds").is_symlink()
+
+    links, _dirs = manager.repair_deployment()
+    assert links == 1
+    assert not (install / "Data" / "Textures").exists()
+    assert not (manager.state_dir / "deployed.json").exists()
+
+    # The mod itself is untouched and redeploys cleanly.
+    assert [m.name for m in manager.list_mods()] == ["Tex Mod"]
+    manager.deploy()
+    assert (install / "Data" / "Textures" / "thing.dds").read_text() == "x"
+
+
+def test_repair_clears_links_left_dangling_by_removing_mods(tmp_path, game):
+    """Removing mods deletes their staged files but doesn't undeploy, so the
+    game folder is left holding links to files that no longer exist. Repair
+    has to still recognise those as its own - resolving a dangling link is
+    the case that could easily have failed."""
+    archive_path = tmp_path / "m.zip"
+    _make_zip(archive_path, {"Textures/a.dds": "A", "a.esp": "E"})
+
+    manager = ModManager(game)
+    manager.install_from_archive(archive_path, "Doomed Mod")
+    manager.deploy()
+
+    install = tmp_path / "install"
+    (install / "Data" / "Fallout4 - Main.ba2").write_text("VANILLA")
+
+    manager.remove_many([m.id for m in manager.list_mods()], delete_files=True)
+    assert manager.list_mods() == []
+    assert (install / "Data" / "a.esp").is_symlink()
+    assert not (install / "Data" / "a.esp").exists()  # dangling
+
+    assert manager.count_managed_links() == 2
+    links, _dirs = manager.repair_deployment()
+
+    assert links == 2
+    assert not (install / "Data" / "a.esp").is_symlink()
+    assert not (install / "Data" / "Textures").exists()
+    assert (install / "Data" / "Fallout4 - Main.ba2").read_text() == "VANILLA"

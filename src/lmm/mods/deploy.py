@@ -103,7 +103,31 @@ def scan_mod_files(mod_root: Path) -> list[Path]:
         if rel.parts and rel.parts[0].lower() in _NON_CONTENT_TOP_LEVEL:
             continue
         found.append(rel)
+    # rglob yields directory order, which varies between filesystems and even
+    # between runs. Sorting keeps deploys reproducible: without it, which of
+    # two case-variant paths wins - and so which spelling becomes canonical -
+    # would be down to whatever order the directory happened to enumerate in.
+    found.sort()
     return found
+
+
+def find_case_collisions(mod_root: Path) -> dict[str, list[str]]:
+    """Paths *within a single mod* that differ only in capitalisation.
+
+    Across mods this is routine and handled by ``CaseRegistry``, but one
+    archive containing both ``Test/foo.txt`` and ``test/foo.txt`` is a flaw
+    in that archive: on Windows the second would have overwritten the first
+    at pack time, so whichever content the author intended, only one of
+    these was ever meant to exist. LMM has to pick one and can't know which,
+    so the honest thing is to say so rather than silently choose.
+
+    Returns folded path -> the differing real paths (2 or more).
+    """
+    by_folded: dict[str, list[str]] = {}
+    for rel in scan_mod_files(mod_root):
+        posix = rel.as_posix()
+        by_folded.setdefault(posix.lower(), []).append(posix)
+    return {folded: paths for folded, paths in by_folded.items() if len(paths) > 1}
 
 
 class CaseRegistry:
@@ -324,6 +348,84 @@ def _remove_tracked_links(
             pass  # not empty, or not ours to remove - leave it alone
 
     return removed
+
+
+def find_managed_links(game_root: Path, mods_dir: Path) -> list[Path]:
+    """Every symlink under ``game_root`` that points into ``mods_dir``.
+
+    This is a *provable* ownership test that needs no manifest: a symlink
+    resolving into the managed staging directory can only have been created
+    by LMM. That matters when the manifest can't be trusted - a deployment
+    made by an older version, one interrupted partway, or one whose records
+    have drifted from what's actually on disk.
+
+    Regular files are never returned, so the game's own files can't be
+    caught up in it even when they sit in the same directory.
+    """
+    game_root, mods_dir = Path(game_root), Path(mods_dir).resolve()
+    if not game_root.is_dir():
+        return []
+
+    found: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(game_root, followlinks=False):
+        for name in filenames:
+            path = Path(dirpath) / name
+            if not path.is_symlink():
+                continue
+            try:
+                target = path.resolve()
+            except OSError:
+                continue
+            if mods_dir in target.parents:
+                found.append(path)
+    return found
+
+
+def remove_managed_links(game_root: Path, mods_dir: Path) -> tuple[int, int]:
+    """Removes every symlink pointing into ``mods_dir`` and prunes the
+    directories that leaves empty. Returns (links removed, dirs removed).
+
+    Repairs a game folder that a previous LMM version left in a state its
+    own records no longer describe - files deployed one level too deep, or
+    split across case-variant folders. Only ever removes links it can prove
+    it owns and directories it just emptied, so the game's own files and any
+    folder still holding something are left alone.
+    """
+    game_root = Path(game_root)
+    links = find_managed_links(game_root, mods_dir)
+    removed_links = 0
+    touched: set[Path] = set()
+    for link in links:
+        try:
+            link.unlink()
+            removed_links += 1
+            touched.add(link.parent)
+        except OSError:
+            pass
+
+    # Deepest first, so emptying a child lets its parent go too.
+    removed_dirs = 0
+    for directory in sorted(_with_ancestors(touched, game_root), key=lambda p: len(p.parts), reverse=True):
+        if directory == game_root:
+            continue
+        try:
+            directory.rmdir()
+            removed_dirs += 1
+        except OSError:
+            pass  # not empty, or not ours - leave it
+    return removed_links, removed_dirs
+
+
+def _with_ancestors(directories: set[Path], stop_at: Path) -> set[Path]:
+    """Each directory plus every ancestor up to (not including) ``stop_at``,
+    so a whole emptied tree can be pruned rather than only its leaves."""
+    out: set[Path] = set()
+    for directory in directories:
+        current = directory
+        while current != stop_at and stop_at in current.parents:
+            out.add(current)
+            current = current.parent
+    return out
 
 
 def undeploy_all(game_root: Path, state_dir: Path, legacy_base: Path | None = None) -> int:

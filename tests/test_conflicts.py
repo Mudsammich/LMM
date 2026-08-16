@@ -75,3 +75,43 @@ def test_write_log_overwrites_rather_than_accumulating(tmp_path):
 def test_a_path_with_one_provider_is_not_a_conflict():
     report = conflicts.build_report({"Data/solo.dds": ["only"]})
     assert report.pairs == []
+
+
+def test_a_mods_self_collision_is_not_counted_as_a_mod_conflict():
+    """One archive holding two case-variants lists the same mod twice. That
+    is a flaw in the archive, not a conflict between mods, and must not
+    inflate the conflict count."""
+    report = conflicts.build_report({"Data/Test/foo.txt": ["sloppy", "sloppy"]})
+
+    assert report.total_paths == 0
+    assert report.pairs == []
+
+
+def test_duplicate_providers_do_not_duplicate_a_pair():
+    report = conflicts.build_report({"Data/x.dds": ["a", "a", "b"]})
+
+    assert [(p.loser_id, p.winner_id, p.count) for p in report.pairs] == [("a", "b", 1)]
+
+
+def test_internal_collisions_are_reported_with_a_warning():
+    report = conflicts.build_report(
+        {},
+        {"sloppy": {"test/foo.txt": ["Test/foo.txt", "test/foo.txt"]}},
+    )
+    summary = conflicts.render_summary(report, {"sloppy": "Sloppy Mod"})
+
+    assert "No file conflicts" in summary
+    assert "WARNING" in summary
+    assert "Sloppy Mod" in summary
+    assert "Test/foo.txt  vs  test/foo.txt" in summary
+
+
+def test_internal_collisions_appear_in_the_log_too():
+    report = conflicts.build_report(
+        {"Data/a.dds": ["base", "patch"]},
+        {"sloppy": {"test/foo.txt": ["Test/foo.txt", "test/foo.txt"]}},
+    )
+    log = conflicts.render_log(report, {"sloppy": "Sloppy Mod", "base": "B", "patch": "P"})
+
+    assert "SAME PATH TWICE" in log
+    assert "Sloppy Mod" in log

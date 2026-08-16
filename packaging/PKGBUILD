@@ -11,10 +11,16 @@
 # else below (including pyside6, python-py7zr, python-rarfile) is in the
 # official [extra] repo.
 #
-# pkgver() derives from the current git commit (0.1.0.r<count>.g<hash>),
-# not a hardcoded string, so every new commit produces a version AUR
-# helpers recognize as new - `paru -Bi` won't silently skip rebuilding a
-# stale cached version after you pull new source changes.
+# pkgver() derives from the current git commit rather than a hardcoded
+# string, so every new commit produces a version AUR helpers recognise as
+# new - `paru -Bi` won't silently skip rebuilding a stale cached version
+# after pulling new source.
+#
+# The revision is the commit's *timestamp*, not a commit count. A count
+# isn't monotonic: squash-merging a branch collapses many commits into one,
+# so the next build's count is far lower than the previous build's and
+# pacman reports newer code as a downgrade. A timestamp only ever goes up,
+# whatever happens to the history.
 
 pkgname=lmm
 pkgver=0.1.0
@@ -50,7 +56,9 @@ pkgver() {
 		echo "pkgver(): $(pwd) is not a git repository - \$startdir is '$startdir'" >&2
 		return 1
 	fi
-	printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+	printf '0.1.0.r%s.g%s' \
+		"$(git log -1 --format=%cd --date=format:%Y%m%d%H%M)" \
+		"$(git rev-parse --short HEAD)"
 }
 
 build() {

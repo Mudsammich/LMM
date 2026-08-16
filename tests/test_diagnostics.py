@@ -227,8 +227,25 @@ plugin XDI.dll (00000001 XDI 00000001) loaded correctly (handle 6)
 
 def test_decode_runtime_version_matches_known_builds():
     # The version every Fallout 4 mod page quotes, as the format check.
-    assert diagnostics.decode_runtime_version("010A00A3") == "1.10.163"
+    assert diagnostics.decode_runtime_version("010A00A3", "0.6.23") == "1.10.163"
     assert diagnostics.decode_runtime_version("nonsense") == ""
+
+
+def test_decode_runtime_version_handles_the_0_7_encoding():
+    """F4SE 0.7 shifted the build up four bits to fit a sub-minor. Decoded
+    with the old rule this reads 1.11.3536 - a version that doesn't exist,
+    and exactly the wrong thing to go searching Nexus with."""
+    assert diagnostics.decode_runtime_version("010B0DD0", "0.7.8") == "1.11.221"
+    assert diagnostics.decode_runtime_version("010B0DD0", "0.6.23") == "1.11.3536"
+
+
+def test_decode_runtime_version_keeps_a_nonzero_subminor():
+    assert diagnostics.decode_runtime_version("010B0DD3", "0.7.8") == "1.11.221.3"
+
+
+def test_decode_runtime_version_without_an_extender_version():
+    """Falls back to the historically documented layout."""
+    assert diagnostics.decode_runtime_version("010A00A3") == "1.10.163"
 
 
 def test_summarise_extender_log_splits_loaded_from_failed():
@@ -236,6 +253,7 @@ def test_summarise_extender_log_splits_loaded_from_failed():
 
     assert summary.extender_version == "0.7.8"
     assert summary.runtime_raw == "010B0DD0"
+    assert summary.runtime_version == "1.11.221"
     assert summary.total == 5
     assert {p.file for p in summary.loaded} == {"mcm.dll", "XDI.dll"}
     assert len(summary.failed) == 3
@@ -366,3 +384,174 @@ def test_no_extender_folder_at_all(tmp_path):
 
     assert status.plugins_dir is None
     assert "No script extender Plugins folder" in status.detail
+
+
+# -- duplicate paths differing only in case -----------------------------------------------------
+
+
+def test_find_case_duplicates_spots_split_folders(tmp_path):
+    """The fingerprint of a deploy made before casing was merged: the game
+    can only find one of these, so half the mod is invisible to it."""
+    data = tmp_path / "Data"
+    (data / "Scripts").mkdir(parents=True)
+    (data / "scripts").mkdir()
+    (data / "SCRIPTS").mkdir()
+    (data / "Textures").mkdir()
+
+    duplicates = diagnostics.find_case_duplicates(tmp_path)
+
+    assert len(duplicates) == 1
+    assert duplicates[0].names == ["SCRIPTS", "Scripts", "scripts"]
+    assert duplicates[0].describe(tmp_path).startswith("Data/")
+
+
+def test_find_case_duplicates_spots_split_files(tmp_path):
+    data = tmp_path / "Data"
+    data.mkdir()
+    (data / "PPF.esm").write_text("a")
+    (data / "ppf.esm").write_text("b")
+
+    duplicates = diagnostics.find_case_duplicates(tmp_path)
+
+    assert [d.names for d in duplicates] == [["PPF.esm", "ppf.esm"]]
+
+
+def test_find_case_duplicates_clean_install(tmp_path):
+    data = tmp_path / "Data" / "Textures"
+    data.mkdir(parents=True)
+    (data / "thing.dds").write_text("x")
+
+    assert diagnostics.find_case_duplicates(tmp_path) == []
+
+
+def test_find_case_duplicates_is_bounded(tmp_path):
+    data = tmp_path / "Data"
+    data.mkdir()
+    for i in range(30):
+        (data / f"Dir{i}").mkdir()
+        (data / f"dir{i}").mkdir()
+
+    assert len(diagnostics.find_case_duplicates(tmp_path, limit=5)) == 5
+
+
+def test_find_case_duplicates_on_a_missing_folder(tmp_path):
+    assert diagnostics.find_case_duplicates(tmp_path / "nope") == []
+
+
+def test_case_duplicate_describes_how_much_is_in_each(tmp_path):
+    """Which of a pair to delete is the whole question, and the file counts
+    answer it - the near-empty one is the stray."""
+    data = tmp_path / "Data"
+    real = data / "Scripts"
+    real.mkdir(parents=True)
+    for i in range(3):
+        (real / f"s{i}.pex").write_text("x")
+    stray = data / "scripts"
+    stray.mkdir()
+    (stray / "leftover.pex").write_text("x")
+
+    described = diagnostics.find_case_duplicates(tmp_path)[0].describe(tmp_path)
+
+    assert described == "Data/  ->  Scripts (3 files)  vs  scripts (1 file)"
+
+
+def test_case_duplicate_describes_files_and_links(tmp_path):
+    data = tmp_path / "Data"
+    data.mkdir()
+    (data / "PPF.esm").write_text("a")
+    (data / "ppf.esm").symlink_to(data / "PPF.esm")
+
+    described = diagnostics.find_case_duplicates(tmp_path)[0].describe(tmp_path)
+
+    assert "PPF.esm (file)" in described
+    assert "ppf.esm (link)" in described
+
+
+# -- empty vs real duplicates -----------------------------------------------------
+
+
+def test_all_empty_duplicate_hides_nothing(tmp_path):
+    """A modded game folder collects dozens of empty case-duplicate shells.
+    Reporting them the same as a real one buries the real one."""
+    data = tmp_path / "Data"
+    (data / "Textures").mkdir(parents=True)
+    (data / "textures").mkdir()
+
+    duplicate = diagnostics.find_case_duplicates(tmp_path)[0]
+
+    assert not duplicate.hides_something
+
+
+def test_duplicate_with_content_hides_something(tmp_path):
+    data = tmp_path / "Data"
+    (data / "Scripts").mkdir(parents=True)
+    (data / "Scripts" / "a.pex").write_text("x")
+    (data / "scripts").mkdir()
+
+    duplicate = diagnostics.find_case_duplicates(tmp_path)[0]
+
+    assert duplicate.hides_something
+
+
+def test_prune_removes_the_empty_side_and_keeps_the_full_one(tmp_path):
+    """Resolves the duplicate outright: the empty copy goes, the files stay
+    where they are - no manual merge needed."""
+    data = tmp_path / "Data" / "Scripts"
+    (data / "Source").mkdir(parents=True)
+    (data / "Source" / "a.psc").write_text("x")
+    (data / "source").mkdir()
+
+    assert diagnostics.prune_empty_case_duplicates(tmp_path) == 1
+
+    assert (data / "Source" / "a.psc").read_text() == "x"
+    assert not (data / "source").exists()
+    assert diagnostics.find_case_duplicates(tmp_path) == []
+
+
+def test_prune_keeps_one_when_every_side_is_empty(tmp_path):
+    """Removing all of them would delete the path rather than de-duplicate
+    it - the folder should survive, just once instead of twice."""
+    data = tmp_path / "Data"
+    (data / "Textures").mkdir(parents=True)
+    (data / "textures").mkdir()
+
+    assert diagnostics.prune_empty_case_duplicates(tmp_path) == 1
+
+    survivors = [p.name for p in data.iterdir()]
+    assert len(survivors) == 1
+    assert survivors[0].lower() == "textures"
+
+
+def test_prune_repeats_until_stable(tmp_path):
+    """Emptying a folder can leave its parent empty and itself half of a
+    duplicate one level up, so one pass isn't enough."""
+    data = tmp_path / "Data"
+    (data / "Sound" / "FX" / "MUS").mkdir(parents=True)
+    (data / "Sound" / "fx" / "mus").mkdir(parents=True)
+
+    diagnostics.prune_empty_case_duplicates(tmp_path)
+
+    assert diagnostics.find_case_duplicates(tmp_path) == []
+
+
+def test_prune_never_touches_a_duplicate_where_both_sides_have_files(tmp_path):
+    """That one is a real merge decision and isn't LMM's to make."""
+    data = tmp_path / "Data"
+    for name in ("Textures", "textures"):
+        (data / name).mkdir(parents=True)
+        (data / name / "thing.dds").write_text(name)
+
+    assert diagnostics.prune_empty_case_duplicates(tmp_path) == 0
+    assert (data / "Textures" / "thing.dds").exists()
+    assert (data / "textures" / "thing.dds").exists()
+
+
+def test_prune_leaves_real_game_files_alone(tmp_path):
+    data = tmp_path / "Data"
+    (data / "Textures").mkdir(parents=True)
+    (data / "textures").mkdir()
+    (data / "Fallout4 - Main.ba2").write_text("VANILLA")
+
+    diagnostics.prune_empty_case_duplicates(tmp_path)
+
+    assert (data / "Fallout4 - Main.ba2").read_text() == "VANILLA"

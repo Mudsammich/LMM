@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -76,9 +78,10 @@ class ModsTab(QWidget):
         conflicts_btn = QPushButton("Show Conflicts")
         suggest_order_btn = QPushButton("Suggest Order (beta)")
         deploy_root_btn = QPushButton("Deploy Target…")
+        repair_btn = QPushButton("Repair Deployment…")
 
         install_btn.clicked.connect(self._install_from_archive)
-        select_all_btn.clicked.connect(self.table.selectAll)
+        select_all_btn.clicked.connect(self._select_all_visible)
         remove_btn.clicked.connect(self._remove_selected)
         remove_all_btn.clicked.connect(self._remove_all)
         up_btn.clicked.connect(lambda: self._move_selected(-1))
@@ -88,19 +91,30 @@ class ModsTab(QWidget):
         conflicts_btn.clicked.connect(self._show_conflicts)
         suggest_order_btn.clicked.connect(self._suggest_order)
         deploy_root_btn.clicked.connect(self._set_deploy_root)
+        repair_btn.clicked.connect(self._repair_deployment)
 
         button_row = QHBoxLayout()
         for b in (
             install_btn, select_all_btn, remove_btn, remove_all_btn,
             up_btn, down_btn, deploy_btn, undeploy_btn, conflicts_btn,
-            suggest_order_btn, deploy_root_btn,
+            suggest_order_btn, deploy_root_btn, repair_btn,
         ):
             button_row.addWidget(b)
         button_row.addStretch(1)
 
+        self.filter_edit = QLineEdit()
+        self.filter_edit.setPlaceholderText("Filter mods by name or source…  (Ctrl+F)")
+        self.filter_edit.setClearButtonEnabled(True)
+        self.filter_edit.textChanged.connect(self._apply_filter)
+        self.filter_count_label = QLabel("")
+        self.filter_count_label.setProperty("role", "status")
+        QShortcut(QKeySequence.Find, self, activated=self.filter_edit.setFocus)
+
         top_row = QHBoxLayout()
         top_row.addWidget(QLabel("Game:"))
         top_row.addWidget(self.game_combo, 1)
+        top_row.addWidget(self.filter_edit, 2)
+        top_row.addWidget(self.filter_count_label)
 
         self.status_label = QLabel("")
         self.status_label.setProperty("role", "status")
@@ -167,6 +181,7 @@ class ModsTab(QWidget):
                 source = f"nexus #{mod.source.mod_id}"
             self.table.setItem(row, 4, QTableWidgetItem(source))
         self.table.blockSignals(False)
+        self._apply_filter()  # rows were rebuilt, so hidden flags are gone
         self._refresh_plugins()
 
     def _on_item_changed(self, item) -> None:
@@ -178,6 +193,65 @@ class ModsTab(QWidget):
         mod_id = item.data(1000)
         manager = self.ctx.mod_manager(game_id)
         manager.set_enabled(mod_id, item.checkState() == Qt.Checked)
+
+    # -- filtering -----------------------------------------------------
+
+    def _apply_filter(self) -> None:
+        """Hides rows that don't match, so a specific mod can be found in a
+        list of hundreds without scrolling.
+
+        Every space-separated term has to match somewhere in the row, which
+        makes narrowing easy ("armor patch" finds the armor patch without
+        needing to remember its exact name). A row being hidden also clears
+        its selection - otherwise Select All would quietly include mods that
+        aren't on screen, and Remove Selected would delete them.
+        """
+        terms = [t for t in self.filter_edit.text().lower().split() if t]
+        visible = 0
+        selection = self.table.selectionModel()
+        for row in range(self.table.rowCount()):
+            haystack = " ".join(
+                self.table.item(row, col).text().lower()
+                for col in range(self.table.columnCount())
+                if self.table.item(row, col) is not None
+            )
+            matches = all(term in haystack for term in terms)
+            self.table.setRowHidden(row, not matches)
+            if matches:
+                visible += 1
+            elif selection is not None:
+                selection.select(
+                    self.table.model().index(row, 0),
+                    QItemSelectionModel.Deselect | QItemSelectionModel.Rows,
+                )
+
+        total = self.table.rowCount()
+        self.filter_count_label.setText(
+            "" if not terms else f"{visible} of {total}"
+        )
+
+    def _select_all_visible(self) -> None:
+        """Select All must mean what's on screen. Qt's own selectAll()
+        includes filtered-out rows, which would make Remove Selected delete
+        mods the user can't see.
+
+        Built as one selection and applied in a single call - selectRow() in
+        extended-selection mode *replaces* the selection rather than adding
+        to it, so looping over it would leave only the last row selected.
+        """
+        self._select_visible_rows(self.table)
+
+    @staticmethod
+    def _select_visible_rows(table: QTableWidget) -> None:
+        selection = QItemSelection()
+        model = table.model()
+        last_column = table.columnCount() - 1
+        for row in range(table.rowCount()):
+            if not table.isRowHidden(row):
+                selection.select(model.index(row, 0), model.index(row, last_column))
+        table.selectionModel().select(
+            selection, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows
+        )
 
     def _selected_mod_id(self) -> str | None:
         rows = self.table.selectionModel().selectedRows()
@@ -244,6 +318,7 @@ class ModsTab(QWidget):
         manager.remove_many(mod_ids, delete_files=reply == QMessageBox.Yes)
         self.ctx.notify_mods_changed(game_id)
         self.status_label.setText(f"Removed {len(mod_ids)} mod(s).")
+        self._offer_cleanup_after_removal(game_id)
 
     def _remove_all(self) -> None:
         game_id = self._current_game_id()
@@ -266,8 +341,40 @@ class ModsTab(QWidget):
         delete_files_reply = QMessageBox.question(self, "Remove All", "Delete their staged files too?")
         manager.remove_many(mod_ids, delete_files=delete_files_reply == QMessageBox.Yes)
         self.ctx.notify_mods_changed(game_id)
+        self.status_label.setText(f"Removed all {len(mod_ids)} mod(s).")
+        self._offer_cleanup_after_removal(game_id)
+
+    def _offer_cleanup_after_removal(self, game_id: str) -> None:
+        """Removing mods doesn't undeploy them, so their links stay in the
+        game folder pointing at files that may no longer exist. Nobody
+        expects "remove everything" to leave the game folder full, so offer
+        to finish the job rather than leaving it to be discovered later."""
+        manager = self.ctx.mod_manager(game_id)
+        count = manager.count_managed_links()
+        if not count:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Deployed files still in the game folder",
+            f"{count} file(s) from removed mods are still deployed in the game "
+            "folder. Remove them now?\n\nOnly links pointing into this game's mod "
+            "staging folder are removed - the game's own files are never touched.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            self.status_label.setText(
+                f"{count} deployed file(s) from removed mods remain - "
+                "use Repair Deployment when you want them gone."
+            )
+            return
+        try:
+            links, dirs = manager.repair_deployment()
+        except OSError as exc:
+            QMessageBox.critical(self, "Repair Deployment", f"{type(exc).__name__}: {exc}")
+            return
         self.status_label.setText(
-            f"Removed all {len(mod_ids)} mod(s). Deploy again to clean up any now-stale links."
+            f"Removed {links} deployed file(s) and {dirs} emptied folder(s) from the game folder."
         )
 
     def _move_selected(self, delta: int) -> None:
@@ -371,6 +478,49 @@ class ModsTab(QWidget):
         self.ctx.notify_mods_changed(game_id)
         self.status_label.setText(f"Reordered based on {len(lines)} conflict-resolution hint(s).")
 
+    def _repair_deployment(self) -> None:
+        game_id = self._current_game_id()
+        if not game_id:
+            return
+        manager = self.ctx.mod_manager(game_id)
+        game = self.ctx.config.games[game_id]
+        count = manager.count_managed_links()
+        if not count:
+            QMessageBox.information(
+                self,
+                "Repair Deployment",
+                "No deployed links found in the game folder - there's nothing to "
+                "repair. Anything left there wasn't put there by LMM.",
+            )
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Repair Deployment",
+            f"Remove all {count} link(s) LMM has deployed into:\n{game.install_path}\n\n"
+            "This finds them on disk rather than from LMM's records, so it also "
+            "cleans up a deployment made by an older version - files left in a "
+            "nested Data folder, or split across folders differing only in case.\n\n"
+            "Only symlinks pointing into this game's mod staging folder are "
+            "removed, so the game's own files are never touched. Your installed "
+            "mods are not affected - click Deploy afterwards to lay them out "
+            "correctly.\n\nContinue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            links, dirs = manager.repair_deployment()
+        except OSError as exc:
+            QMessageBox.critical(self, "Repair Deployment", f"{type(exc).__name__}: {exc}")
+            return
+        self.status_label.setText(
+            f"Removed {links} deployed link(s) and {dirs} emptied folder(s). "
+            "Click Deploy to lay your mods out again."
+        )
+
     def _set_deploy_root(self) -> None:
         game_id = self._current_game_id()
         mod_ids = self._selected_mod_ids()
@@ -436,8 +586,13 @@ class ModsTab(QWidget):
         write_btn.setProperty("role", "primary")
         import_btn = QPushButton("Import from Plugins.txt")
 
+        self.plugins_filter_edit = QLineEdit()
+        self.plugins_filter_edit.setPlaceholderText("Filter plugins…")
+        self.plugins_filter_edit.setClearButtonEnabled(True)
+        self.plugins_filter_edit.textChanged.connect(self._apply_plugin_filter)
+
         sync_btn.clicked.connect(self._sync_plugins)
-        select_all_btn.clicked.connect(lambda: self.plugins_table.selectAll())
+        select_all_btn.clicked.connect(self._select_all_visible_plugins)
         remove_btn.clicked.connect(self._remove_selected_plugins)
         up_btn.clicked.connect(lambda: self._move_plugin(-1))
         down_btn.clicked.connect(lambda: self._move_plugin(1))
@@ -448,6 +603,7 @@ class ModsTab(QWidget):
         for b in (sync_btn, select_all_btn, remove_btn, up_btn, down_btn, write_btn, import_btn):
             plugin_button_row.addWidget(b)
         plugin_button_row.addStretch(1)
+        plugin_button_row.addWidget(self.plugins_filter_edit, 1)
 
         self.plugins_table = QTableWidget(0, len(PLUGIN_COLUMNS))
         self.plugins_table.setHorizontalHeaderLabels(PLUGIN_COLUMNS)
@@ -489,6 +645,27 @@ class ModsTab(QWidget):
             self.plugins_table.setItem(row, 0, enabled_item)
             self.plugins_table.setItem(row, 1, QTableWidgetItem(plugin.name))
         self.plugins_table.blockSignals(False)
+        self._apply_plugin_filter()  # rows were rebuilt, so hidden flags are gone
+
+    def _apply_plugin_filter(self) -> None:
+        """Same idea as the mod filter - a Bethesda load order runs to
+        hundreds of entries too, and finding one to disable means scrolling
+        otherwise."""
+        terms = [t for t in self.plugins_filter_edit.text().lower().split() if t]
+        selection = self.plugins_table.selectionModel()
+        for row in range(self.plugins_table.rowCount()):
+            item = self.plugins_table.item(row, 1)
+            haystack = item.text().lower() if item is not None else ""
+            matches = all(term in haystack for term in terms)
+            self.plugins_table.setRowHidden(row, not matches)
+            if not matches and selection is not None:
+                selection.select(
+                    self.plugins_table.model().index(row, 0),
+                    QItemSelectionModel.Deselect | QItemSelectionModel.Rows,
+                )
+
+    def _select_all_visible_plugins(self) -> None:
+        self._select_visible_rows(self.plugins_table)
 
     def _on_plugin_item_changed(self, item) -> None:
         if item.column() != 0:

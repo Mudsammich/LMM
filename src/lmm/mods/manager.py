@@ -292,6 +292,25 @@ class ModManager:
             self._game_root(), self.state_dir, legacy_base=Path(self.game.deploy_target())
         )
 
+    def count_managed_links(self) -> int:
+        """How many deployed links LMM can prove it owns, counted from disk
+        rather than from its records - so a repair can say what it's about
+        to do before doing it."""
+        return len(deploy.find_managed_links(self._game_root(), Path(self.game.mods_dir)))
+
+    def repair_deployment(self) -> tuple[int, int]:
+        """Clears every link pointing into this game's staging directory and
+        prunes the folders that empties, then forgets the deployment record.
+
+        For a game folder an older LMM left in a state its own manifest no
+        longer describes - files deployed one level too deep in a nested
+        Data folder, or split across case-variant folders. Deploy afterwards
+        to lay it out correctly. Returns (links removed, folders removed).
+        """
+        removed = deploy.remove_managed_links(self._game_root(), Path(self.game.mods_dir))
+        (self.state_dir / "deployed.json").unlink(missing_ok=True)
+        return removed
+
     def deploy_roots(self) -> dict[str, str]:
         """mod id -> where each enabled mod's files will actually go, for
         the UI to surface. Resolves "auto" to what detection decided."""
@@ -319,7 +338,13 @@ class ModManager:
         and the path of the full log written alongside. The exhaustive
         per-file listing goes to the log because a large modlist produces
         thousands of them - far past what's readable on screen."""
-        report = conflicts_module.build_report(self.preview_conflicts())
+        mods_dir = Path(self.game.mods_dir)
+        internal = {}
+        for mod in self._enabled_mods_sorted():
+            collisions = deploy.find_case_collisions(mods_dir / mod.staging_subdir)
+            if collisions:
+                internal[mod.id] = collisions
+        report = conflicts_module.build_report(self.preview_conflicts(), internal)
         with self._lock:
             names = {m.id: m.name for m in self._mods.values()}
         log_path = conflicts_module.write_log(self.state_dir, report, names, self.game.name)

@@ -314,3 +314,137 @@ def test_upgrade_cleans_up_a_pre_root_relative_deployment(tmp_path):
     assert removed == 1
     assert not (data_dir / "old.esp").exists()
     assert data_dir.is_dir()
+
+
+def test_reported_case_collision_test_case(tmp_path):
+    """Verbatim from the bug report: two mods, one shipping
+    Data/Test/foo.txt and the other Data/test/foo.txt. Must be flagged as a
+    conflict, deploy exactly one file at one canonical path, with priority
+    order deciding the winner - identical to an ordinary same-case conflict."""
+    mods_dir = tmp_path / "mods"
+    game_root = tmp_path / "game"
+    state_dir = tmp_path / "state"
+    _make_mod_file(mods_dir, "mod-a", "Test/foo.txt", "from A")
+    _make_mod_file(mods_dir, "mod-b", "test/foo.txt", "from B")
+
+    mod_a = InstalledMod(id="mod-a", name="A", game_id="g", staging_subdir="mod-a", priority=0)
+    mod_b = InstalledMod(id="mod-b", name="B", game_id="g", staging_subdir="mod-b", priority=1)
+
+    plan = deploy.build_plan(mods_dir, [mod_a, mod_b], deploy_subpath="Data", target_dir=game_root)
+
+    assert len(plan.links) == 1
+    assert list(plan.conflicts.values()) == [["mod-a", "mod-b"]]
+
+    deploy.apply_plan(plan, game_root, state_dir, DeployMethod.SYMLINK)
+    deployed = [p for p in (game_root / "Data").rglob("*") if p.is_file()]
+    assert len(deployed) == 1
+    assert deployed[0].read_text() == "from B"  # higher priority wins
+
+
+def test_scan_mod_files_is_deterministic(tmp_path):
+    """rglob returns directory order, which varies. Without sorting, which
+    of two case-variants becomes canonical would differ between runs."""
+    mods_dir = tmp_path / "mods"
+    for rel in ("test/foo.txt", "Test/foo.txt", "b.txt", "A.txt"):
+        _make_mod_file(mods_dir, "mod", rel, "x")
+
+    scanned = deploy.scan_mod_files(mods_dir / "mod")
+    assert scanned == sorted(scanned)
+
+
+def test_find_case_collisions_within_one_archive(tmp_path):
+    mods_dir = tmp_path / "mods"
+    _make_mod_file(mods_dir, "sloppy", "Test/foo.txt", "upper")
+    _make_mod_file(mods_dir, "sloppy", "test/foo.txt", "lower")
+    _make_mod_file(mods_dir, "sloppy", "fine.txt", "ok")
+
+    collisions = deploy.find_case_collisions(mods_dir / "sloppy")
+
+    assert collisions == {"test/foo.txt": ["Test/foo.txt", "test/foo.txt"]}
+
+
+def test_find_case_collisions_clean_archive(tmp_path):
+    mods_dir = tmp_path / "mods"
+    _make_mod_file(mods_dir, "tidy", "Test/foo.txt", "x")
+    _make_mod_file(mods_dir, "tidy", "Test/bar.txt", "y")
+
+    assert deploy.find_case_collisions(mods_dir / "tidy") == {}
+
+
+# -- repairing an old deployment -----------------------------------------------------
+
+
+def test_find_managed_links_ignores_real_game_files(tmp_path):
+    """The safety property: a repair must never be able to delete the game's
+    own files, only links it can prove point into managed staging."""
+    mods_dir = tmp_path / "mods"
+    game_root = tmp_path / "game"
+    (game_root / "Data").mkdir(parents=True)
+    _make_mod_file(mods_dir, "mod-a", "thing.dds", "modded")
+
+    (game_root / "Data" / "Fallout4 - Textures.ba2").write_text("vanilla archive")
+    (game_root / "Fallout4.exe").write_text("game")
+    (game_root / "Data" / "thing.dds").symlink_to(mods_dir / "mod-a" / "thing.dds")
+    # A symlink pointing somewhere else entirely is not ours either.
+    (game_root / "Data" / "elsewhere.dds").symlink_to(tmp_path / "outside.dds")
+
+    found = deploy.find_managed_links(game_root, mods_dir)
+
+    assert [p.name for p in found] == ["thing.dds"]
+
+
+def test_repair_clears_a_nested_data_deployment(tmp_path):
+    """Reproduces the real-world mess: files deployed into Data/Data by an
+    older version, plus case-split folders, none of it matching a manifest."""
+    mods_dir = tmp_path / "mods"
+    game_root = tmp_path / "game"
+    _make_mod_file(mods_dir, "mod-a", "a.dds", "A")
+    _make_mod_file(mods_dir, "mod-b", "b.dds", "B")
+
+    nested = game_root / "Data" / "Data" / "textures" / "Actors"
+    nested.mkdir(parents=True)
+    (nested / "a.dds").symlink_to(mods_dir / "mod-a" / "a.dds")
+    split = game_root / "Data" / "Textures" / "actors"
+    split.mkdir(parents=True)
+    (split / "b.dds").symlink_to(mods_dir / "mod-b" / "b.dds")
+    (game_root / "Data" / "Fallout4 - Main.ba2").write_text("vanilla")
+
+    links, dirs = deploy.remove_managed_links(game_root, mods_dir)
+
+    assert links == 2
+    assert dirs >= 4  # the emptied trees are pruned, not just their leaves
+    assert not (game_root / "Data" / "Data").exists()
+    assert not (game_root / "Data" / "Textures").exists()
+    # The game's own files and folder survive untouched.
+    assert (game_root / "Data" / "Fallout4 - Main.ba2").read_text() == "vanilla"
+    assert game_root.is_dir()
+
+
+def test_repair_keeps_folders_that_still_hold_something(tmp_path):
+    mods_dir = tmp_path / "mods"
+    game_root = tmp_path / "game"
+    _make_mod_file(mods_dir, "mod-a", "a.dds", "A")
+    textures = game_root / "Data" / "Textures"
+    textures.mkdir(parents=True)
+    (textures / "a.dds").symlink_to(mods_dir / "mod-a" / "a.dds")
+    (textures / "hand-placed.dds").write_text("mine")
+
+    deploy.remove_managed_links(game_root, mods_dir)
+
+    assert textures.is_dir()
+    assert (textures / "hand-placed.dds").read_text() == "mine"
+
+
+def test_repair_works_with_no_manifest_at_all(tmp_path):
+    """The point of finding links on disk: a deployment whose records were
+    lost or never matched still gets cleaned up."""
+    mods_dir = tmp_path / "mods"
+    game_root = tmp_path / "game"
+    _make_mod_file(mods_dir, "mod-a", "a.dds", "A")
+    (game_root / "Data").mkdir(parents=True)
+    (game_root / "Data" / "a.dds").symlink_to(mods_dir / "mod-a" / "a.dds")
+
+    links, _ = deploy.remove_managed_links(game_root, mods_dir)
+
+    assert links == 1
+    assert not (game_root / "Data" / "a.dds").exists()
