@@ -208,7 +208,9 @@ mods before you deploy, so you're not guessing.
 The mod table supports ctrl/shift-click multi-select: **Remove Selected**
 deletes everything selected in one confirmation instead of one at a time,
 and **Remove All…** clears a game's entire mod list in one step (handy for
-starting over after a big collection install).
+starting over after a big collection install). Removing mods doesn't
+undeploy them, so their files would otherwise stay in the game folder
+pointing at nothing - LMM offers to clear those out straight afterwards.
 
 **Suggest Order (beta)** proposes a reorder to resolve file conflicts,
 using two real modding conventions rather than a guess: a mod whose name

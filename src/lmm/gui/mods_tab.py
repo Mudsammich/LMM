@@ -246,6 +246,7 @@ class ModsTab(QWidget):
         manager.remove_many(mod_ids, delete_files=reply == QMessageBox.Yes)
         self.ctx.notify_mods_changed(game_id)
         self.status_label.setText(f"Removed {len(mod_ids)} mod(s).")
+        self._offer_cleanup_after_removal(game_id)
 
     def _remove_all(self) -> None:
         game_id = self._current_game_id()
@@ -268,8 +269,40 @@ class ModsTab(QWidget):
         delete_files_reply = QMessageBox.question(self, "Remove All", "Delete their staged files too?")
         manager.remove_many(mod_ids, delete_files=delete_files_reply == QMessageBox.Yes)
         self.ctx.notify_mods_changed(game_id)
+        self.status_label.setText(f"Removed all {len(mod_ids)} mod(s).")
+        self._offer_cleanup_after_removal(game_id)
+
+    def _offer_cleanup_after_removal(self, game_id: str) -> None:
+        """Removing mods doesn't undeploy them, so their links stay in the
+        game folder pointing at files that may no longer exist. Nobody
+        expects "remove everything" to leave the game folder full, so offer
+        to finish the job rather than leaving it to be discovered later."""
+        manager = self.ctx.mod_manager(game_id)
+        count = manager.count_managed_links()
+        if not count:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Deployed files still in the game folder",
+            f"{count} file(s) from removed mods are still deployed in the game "
+            "folder. Remove them now?\n\nOnly links pointing into this game's mod "
+            "staging folder are removed - the game's own files are never touched.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            self.status_label.setText(
+                f"{count} deployed file(s) from removed mods remain - "
+                "use Repair Deployment when you want them gone."
+            )
+            return
+        try:
+            links, dirs = manager.repair_deployment()
+        except OSError as exc:
+            QMessageBox.critical(self, "Repair Deployment", f"{type(exc).__name__}: {exc}")
+            return
         self.status_label.setText(
-            f"Removed all {len(mod_ids)} mod(s). Deploy again to clean up any now-stale links."
+            f"Removed {links} deployed file(s) and {dirs} emptied folder(s) from the game folder."
         )
 
     def _move_selected(self, delta: int) -> None:
