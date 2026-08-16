@@ -49,4 +49,14 @@ paru -Bi packaging/
 
 # Leave the tree clean so the next run doesn't have to re-do this.
 git restore packaging/PKGBUILD 2>/dev/null || true
+
+# makepkg leaves the built package beside the PKGBUILD, one per build. They
+# are gitignored, but they still pile up unbounded - keep the newest few so
+# a rollback is possible without hoarding every build ever made.
+mapfile -t built < <(ls -1t "$repo_root"/packaging/*.pkg.tar.* 2>/dev/null || true)
+if (( ${#built[@]} > 3 )); then
+	printf '==> Removing %d old built package(s), keeping the newest 3\n' "$(( ${#built[@]} - 3 ))"
+	rm -f -- "${built[@]:3}"
+fi
+
 echo "==> Done."

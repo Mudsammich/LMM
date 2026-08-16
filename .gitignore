@@ -6,3 +6,12 @@ build/
 dist/
 .pytest_cache/
 *.part
+
+# makepkg build output. It lands in packaging/ next to the PKGBUILD, and
+# accumulates one package per build - each one a "local change" that would
+# otherwise block the update script.
+packaging/*.pkg.tar.*
+packaging/*.src.tar.*
+packaging/.SRCINFO
+packaging/src/
+packaging/pkg/
