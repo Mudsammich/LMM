@@ -205,6 +205,13 @@ Reorder mods (later = higher priority = wins file conflicts), then
 **Deploy**. **Show Conflicts** lists exactly which files collide between
 mods before you deploy, so you're not guessing.
 
+**Filter** (the box next to the game selector, or Ctrl+F) narrows the list
+as you type - by name or source, matching every space-separated term, so
+"armor patch" finds it without remembering the exact name. Essential once a
+list runs to hundreds of mods and one of them is misbehaving. **Select All**
+respects the filter, so it's safe to filter and then act on the whole
+result. The plugin list has its own filter for the same reason.
+
 The mod table supports ctrl/shift-click multi-select: **Remove Selected**
 deletes everything selected in one confirmation instead of one at a time,
 and **Remove All…** clears a game's entire mod list in one step (handy for
