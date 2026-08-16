@@ -171,27 +171,48 @@ class GamesTab(QWidget):
             "DUPLICATE PATHS DIFFERING ONLY IN CASE",
             "-" * 60,
         ]
+        hiding = [d for d in duplicates if d.hides_something]
+        empty = [d for d in duplicates if not d.hides_something]
+        root = Path(game.install_path)
+
         if not duplicates:
             lines.append(
                 "None - every path in the game folder is unique to the game, which "
                 "is a Windows program and can't tell 'Scripts' from 'scripts'."
             )
         else:
-            lines += [
-                f"PROBLEM - {len(duplicates)} location(s) hold names that differ only in",
-                "case. The game can only ever find one of each, so whatever is in the",
-                "other is invisible to it. These are left over from a deployment made",
-                "before LMM merged casing, or were put there by hand or another tool.",
-                "",
-                "Mods tab > Repair Deployment clears the ones LMM created, then Deploy",
-                "lays them out correctly. Anything still listed afterwards came from",
-                "somewhere else and has to be removed by hand.",
-                "",
-            ]
-            for duplicate in duplicates[:40]:
-                lines.append(f"  {duplicate.describe(Path(game.install_path))}")
-            if len(duplicates) > 40:
-                lines.append(f"  … and {len(duplicates) - 40} more")
+            if hiding:
+                lines += [
+                    f"PROBLEM - {len(hiding)} location(s) hold the same name twice with",
+                    "something real in at least one of them. The game finds only one, so",
+                    "whatever is in the other is invisible to it.",
+                    "",
+                    "Mods tab > Repair Deployment clears the ones LMM created, then",
+                    "Deploy lays them out correctly. Anything still listed afterwards",
+                    "came from somewhere else and has to be merged or removed by hand -",
+                    "move the smaller folder's contents into the larger, then delete it.",
+                    "",
+                ]
+                for duplicate in hiding[:40]:
+                    lines.append(f"  {duplicate.describe(root)}")
+                if len(hiding) > 40:
+                    lines.append(f"  … and {len(hiding) - 40} more")
+            else:
+                lines.append("No duplicate is hiding anything - nothing is being shadowed.")
+
+            if empty:
+                lines += [
+                    "",
+                    f"Plus {len(empty)} duplicate(s) where both sides are empty. Those",
+                    "hide nothing - they're leftover folder shells - but they're still",
+                    "clutter, and LMM can clear them safely since removing an empty",
+                    "folder loses nothing.",
+                    "",
+                ]
+                for duplicate in empty[:15]:
+                    lines.append(f"  {duplicate.describe(root)}")
+                if len(empty) > 15:
+                    lines.append(f"  … and {len(empty) - 15} more")
 
         lines += [
             "",
@@ -262,7 +283,25 @@ class GamesTab(QWidget):
         dialog = TextReportDialog(f"Diagnose - {game.name}", "\n".join(lines), parent=self)
         dialog.exec()
 
-        if duplicates:
+        if empty:
+            reply = QMessageBox.question(
+                self,
+                "Empty duplicate folders",
+                f"Remove {len(empty)} empty folder(s) that exist only as a "
+                "differently-capitalised copy of a folder beside them?\n\n"
+                "Each one is empty, so nothing is lost, and the version beside it "
+                "stays - so the path itself doesn't disappear, it just stops "
+                "existing twice.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                pruned = diagnostics.prune_empty_case_duplicates(game.install_path)
+                QMessageBox.information(
+                    self, "Empty duplicate folders", f"Removed {pruned} empty folder(s)."
+                )
+
+        if hiding:
             self._offer_repair(game_id, game)
 
         if not status.enabled:

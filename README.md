@@ -317,7 +317,12 @@ where they're easy to miss:
   and can only ever find one of them, so whatever is in the other is
   invisible to it. Diagnose lists them. They're the fingerprint of a deploy
   made before LMM merged casing, or of files put there by hand or another
-  tool. **Undeploy** then **Deploy** clears the ones LMM created; if the
+  tool. Diagnose separates the ones actually hiding files from empty
+  leftover shells, since a modded game folder collects plenty of the latter
+  and they'd otherwise bury the former; it offers to clear the empty ones,
+  which is safe because each removal loses nothing and leaves the
+  identically-named folder beside it. **Undeploy** then **Deploy** clears
+  the ones LMM created; if the
   deployment is old enough that LMM's records no longer describe it, use
   **Repair Deployment…** on the Mods tab instead - it finds LMM's links on
   disk rather than from its records, so it also clears files stranded in a

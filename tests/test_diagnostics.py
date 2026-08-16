@@ -465,3 +465,93 @@ def test_case_duplicate_describes_files_and_links(tmp_path):
 
     assert "PPF.esm (file)" in described
     assert "ppf.esm (link)" in described
+
+
+# -- empty vs real duplicates -----------------------------------------------------
+
+
+def test_all_empty_duplicate_hides_nothing(tmp_path):
+    """A modded game folder collects dozens of empty case-duplicate shells.
+    Reporting them the same as a real one buries the real one."""
+    data = tmp_path / "Data"
+    (data / "Textures").mkdir(parents=True)
+    (data / "textures").mkdir()
+
+    duplicate = diagnostics.find_case_duplicates(tmp_path)[0]
+
+    assert not duplicate.hides_something
+
+
+def test_duplicate_with_content_hides_something(tmp_path):
+    data = tmp_path / "Data"
+    (data / "Scripts").mkdir(parents=True)
+    (data / "Scripts" / "a.pex").write_text("x")
+    (data / "scripts").mkdir()
+
+    duplicate = diagnostics.find_case_duplicates(tmp_path)[0]
+
+    assert duplicate.hides_something
+
+
+def test_prune_removes_the_empty_side_and_keeps_the_full_one(tmp_path):
+    """Resolves the duplicate outright: the empty copy goes, the files stay
+    where they are - no manual merge needed."""
+    data = tmp_path / "Data" / "Scripts"
+    (data / "Source").mkdir(parents=True)
+    (data / "Source" / "a.psc").write_text("x")
+    (data / "source").mkdir()
+
+    assert diagnostics.prune_empty_case_duplicates(tmp_path) == 1
+
+    assert (data / "Source" / "a.psc").read_text() == "x"
+    assert not (data / "source").exists()
+    assert diagnostics.find_case_duplicates(tmp_path) == []
+
+
+def test_prune_keeps_one_when_every_side_is_empty(tmp_path):
+    """Removing all of them would delete the path rather than de-duplicate
+    it - the folder should survive, just once instead of twice."""
+    data = tmp_path / "Data"
+    (data / "Textures").mkdir(parents=True)
+    (data / "textures").mkdir()
+
+    assert diagnostics.prune_empty_case_duplicates(tmp_path) == 1
+
+    survivors = [p.name for p in data.iterdir()]
+    assert len(survivors) == 1
+    assert survivors[0].lower() == "textures"
+
+
+def test_prune_repeats_until_stable(tmp_path):
+    """Emptying a folder can leave its parent empty and itself half of a
+    duplicate one level up, so one pass isn't enough."""
+    data = tmp_path / "Data"
+    (data / "Sound" / "FX" / "MUS").mkdir(parents=True)
+    (data / "Sound" / "fx" / "mus").mkdir(parents=True)
+
+    diagnostics.prune_empty_case_duplicates(tmp_path)
+
+    assert diagnostics.find_case_duplicates(tmp_path) == []
+
+
+def test_prune_never_touches_a_duplicate_where_both_sides_have_files(tmp_path):
+    """That one is a real merge decision and isn't LMM's to make."""
+    data = tmp_path / "Data"
+    for name in ("Textures", "textures"):
+        (data / name).mkdir(parents=True)
+        (data / name / "thing.dds").write_text(name)
+
+    assert diagnostics.prune_empty_case_duplicates(tmp_path) == 0
+    assert (data / "Textures" / "thing.dds").exists()
+    assert (data / "textures" / "thing.dds").exists()
+
+
+def test_prune_leaves_real_game_files_alone(tmp_path):
+    data = tmp_path / "Data"
+    (data / "Textures").mkdir(parents=True)
+    (data / "textures").mkdir()
+    (data / "Fallout4 - Main.ba2").write_text("VANILLA")
+
+    diagnostics.prune_empty_case_duplicates(tmp_path)
+
+    assert (data / "Fallout4 - Main.ba2").read_text() == "VANILLA"

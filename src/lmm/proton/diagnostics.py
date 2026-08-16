@@ -22,6 +22,7 @@ from __future__ import annotations
 import configparser
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -543,27 +544,54 @@ def check_address_library(
 
 _COUNT_CAP = 5000
 
+# Counts below are file counts; these mark entries that aren't directories.
+_IS_FILE = -1
+_IS_LINK = -2
 
-def _describe_entry(path: Path) -> str:
-    """A name plus how much is inside it, so the real folder and the stray
-    one can be told apart at a glance - which is the whole question when
-    deciding which of a pair to delete."""
+
+def _count_contents(path: Path) -> int:
+    """Files under ``path``, or a marker for a non-directory. Bounded, so a
+    folder holding a hundred thousand files can't turn a diagnostic into a
+    long wait."""
     if path.is_symlink():
-        return f"{path.name} (link)"
+        return _IS_LINK
     if path.is_file():
-        return f"{path.name} (file)"
+        return _IS_FILE
     count = 0
     for _dirpath, _dirnames, filenames in os.walk(path, followlinks=False):
         count += len(filenames)
         if count >= _COUNT_CAP:
-            return f"{path.name} ({_COUNT_CAP}+ files)"
-    return f"{path.name} ({count} file{'' if count == 1 else 's'})"
+            return _COUNT_CAP
+    return count
+
+
+def _describe_count(name: str, count: int) -> str:
+    if count == _IS_LINK:
+        return f"{name} (link)"
+    if count == _IS_FILE:
+        return f"{name} (file)"
+    if count >= _COUNT_CAP:
+        return f"{name} ({_COUNT_CAP}+ files)"
+    return f"{name} ({count} file{'' if count == 1 else 's'})"
 
 
 @dataclass
 class CaseDuplicate:
     parent: Path
     names: list[str]
+    counts: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def hides_something(self) -> bool:
+        """True when at least one side actually holds something.
+
+        An all-empty set is only clutter: the game can still find nothing in
+        either, so nothing is being shadowed. Separating the two matters
+        because a modded game folder accumulates dozens of empty
+        case-duplicate shells, and burying the one duplicate that *is*
+        hiding files among them defeats the point of reporting it.
+        """
+        return any(count != 0 for count in self.counts.values())
 
     def describe(self, root: Path) -> str:
         try:
@@ -571,7 +599,7 @@ class CaseDuplicate:
         except ValueError:
             where = self.parent
         location = "." if str(where) == "." else str(where)
-        described = [_describe_entry(self.parent / name) for name in self.names]
+        described = [_describe_count(name, self.counts.get(name, 0)) for name in self.names]
         return f"{location}/  ->  {'  vs  '.join(described)}"
 
 
@@ -598,10 +626,54 @@ def find_case_duplicates(root: str | Path, limit: int = 200) -> list[CaseDuplica
             by_folded.setdefault(name.lower(), []).append(name)
         for names in by_folded.values():
             if len(names) > 1:
-                found.append(CaseDuplicate(parent=Path(dirpath), names=sorted(names)))
+                parent = Path(dirpath)
+                ordered = sorted(names)
+                found.append(
+                    CaseDuplicate(
+                        parent=parent,
+                        names=ordered,
+                        counts={name: _count_contents(parent / name) for name in ordered},
+                    )
+                )
                 if len(found) >= limit:
                     return found
     return found
+
+
+def prune_empty_case_duplicates(root: str | Path, max_passes: int = 8) -> int:
+    """Removes empty directories that exist only as a case-variant of a
+    sibling, and returns how many went.
+
+    Safe in a way that deleting empty directories generally isn't: each one
+    removed is provably empty (so nothing is lost) *and* has a sibling
+    differing only in case that stays behind (so the path itself doesn't
+    disappear - the game still finds it, under one spelling instead of two).
+
+    Repeats until stable, because emptying a directory can leave its parent
+    empty and itself half of a duplicate one level up.
+    """
+    root = Path(root)
+    removed = 0
+    for _ in range(max_passes):
+        removed_this_pass = 0
+        for duplicate in find_case_duplicates(root, limit=10_000):
+            empties = [
+                name for name in duplicate.names if duplicate.counts.get(name) == 0
+            ]
+            # Never take the last one: that would delete the path outright
+            # rather than resolve the duplicate.
+            if len(empties) == len(duplicate.names):
+                empties = empties[1:]
+            for name in empties:
+                try:
+                    shutil.rmtree(duplicate.parent / name)
+                    removed_this_pass += 1
+                except OSError:
+                    pass
+        removed += removed_this_pass
+        if not removed_this_pass:
+            break
+    return removed
 
 
 def read_log_tail(path: str | Path, max_bytes: int = 64 * 1024) -> str:
